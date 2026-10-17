@@ -96,6 +96,7 @@ dependencies = [
  "ab_glyph",
  "image",
  "imageproc",
+ "thiserror",
 ]
 
 [[package]]

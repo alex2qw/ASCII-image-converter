@@ -4,10 +4,14 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+ab_glyph = "0.2"
 image = "0.25"
 imageproc = "0.25"
-ab_glyph = "0.2"
+thiserror = "2"
+
+[lib]
+path = "src/lib.rs"
 
 [[bin]]
 name = "ascii_image_converter"
-path = "src/app/features/convert.rs"
+path = "src/bin/converter.rs"

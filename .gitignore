@@ -10,6 +10,14 @@
 
 # Local input images
 /input_image.png
+/input_image.jpg
+/input_image.jpeg
+/input_image.bmp
+/input_image.gif
+/input_image.svg
+/input_image.webp
+/input_image.tiff
+/input_image.raw
 /input_image.rgb
 
 # macOS files

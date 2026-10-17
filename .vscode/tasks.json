@@ -83,6 +83,325 @@
 			],
 			"isBackground": false,
 			"problemMatcher": []
+		},
+		{
+			"label": "Tune adaptive ASCII rendering",
+			"type": "shell",
+			"command": "sh",
+			"args": [
+				"-c",
+				"cat > src/app/features/convert.rs <<'EOF'\nuse std::error::Error;\nuse std::fs;\nuse std::path::Path;\n\nuse ab_glyph::{FontArc, PxScale};\nuse image::imageops::FilterType;\nuse image::{GrayImage, ImageReader, Luma};\nuse imageproc::drawing::draw_text_mut;\n\nconst CHARACTER_RAMP: &[u8] = b\"@#8&o:*. \";\nconst MAX_COLUMNS: u32 = 180;\nconst FONT_PATH: &str = \"/System/Library/Fonts/Supplemental/Courier New.ttf\";\nconst FONT_SIZE: f32 = 14.0;\nconst CHARACTER_WIDTH: u32 = 8;\nconst CHARACTER_HEIGHT: u32 = 16;\n\nfn luminance_to_character(luminance: u8) -> char {\n    let ramp_index =\n        (luminance as usize * (CHARACTER_RAMP.len() - 1)) / u8::MAX as usize;\n    CHARACTER_RAMP[ramp_index] as char\n}\n\nfn contrast_bounds(image: &GrayImage) -> (u8, u8) {\n    let mut luminances: Vec<u8> = image.pixels().map(|pixel| pixel[0]).collect();\n    luminances.sort_unstable();\n\n    let last_index = luminances.len().saturating_sub(1);\n    let black_index = last_index * 2 / 100;\n    let white_index = last_index * 98 / 100;\n    let black_point = luminances[black_index];\n    let white_point = luminances[white_index].max(black_point.saturating_add(1));\n\n    (black_point, white_point)\n}\n\nfn normalize_luminance(luminance: u8, black_point: u8, white_point: u8) -> u8 {\n    if luminance <= black_point {\n        return 0;\n    }\n    if luminance >= white_point {\n        return u8::MAX;\n    }\n\n    ((luminance - black_point) as u16 * u8::MAX as u16\n        / (white_point - black_point) as u16) as u8\n}\n\nfn convert_to_ascii_image(image: &image::DynamicImage) -> Result<GrayImage, Box<dyn Error>> {\n    let source = image.to_luma8();\n    let columns = source.width().min(MAX_COLUMNS).max(1);\n    let rows = ((source.height() as f32 * columns as f32 / source.width() as f32) * 0.5)\n        .round()\n        .max(1.0) as u32;\n    let resized = image::imageops::resize(&source, columns, rows, FilterType::Triangle);\n    let (black_point, white_point) = contrast_bounds(&resized);\n    let mut output = GrayImage::from_pixel(\n        columns * CHARACTER_WIDTH,\n        rows * CHARACTER_HEIGHT,\n        Luma([0]),\n    );\n    let font = FontArc::try_from_vec(fs::read(FONT_PATH)?)\n        .map_err(|_| format!(\"could not load font at {FONT_PATH}\"))?;\n    let scale = PxScale::from(FONT_SIZE);\n\n    for (x, y, pixel) in resized.enumerate_pixels() {\n        let luminance = normalize_luminance(pixel[0], black_point, white_point);\n        let character = luminance_to_character(luminance);\n        draw_text_mut(\n            &mut output,\n            Luma([u8::MAX]),\n            (x * CHARACTER_WIDTH) as i32,\n            (y * CHARACTER_HEIGHT) as i32,\n            scale,\n            &font,\n            &character.to_string(),\n        );\n    }\n\n    Ok(output)\n}\n\nfn load_image(path: impl AsRef<Path>) -> image::ImageResult<image::DynamicImage> {\n    ImageReader::open(path)?.decode()\n}\n\nfn convert_image_to_ascii(\n    input_path: impl AsRef<Path>,\n    output_path: impl AsRef<Path>,\n) -> Result<(), Box<dyn Error>> {\n    let image = load_image(input_path)?;\n    let ascii_image = convert_to_ascii_image(&image)?;\n    ascii_image.save(output_path)?;\n    Ok(())\n}\n\nfn main() {\n    let input_path = \"input_image.png\";\n    let output_path = \"output_image.png\";\n\n    match convert_image_to_ascii(input_path, output_path) {\n        Ok(()) => println!(\"Image converted to an ASCII image successfully!\"),\n        Err(error) => eprintln!(\"Error converting image: {error}\"),\n    }\n}\nEOF\ncargo run"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Add ASCII color modes",
+			"type": "shell",
+			"command": "sh",
+			"args": [
+				"-c",
+				"cat > src/app/features/convert.rs <<'EOF'\nuse std::error::Error;\nuse std::fs;\nuse std::path::Path;\n\nuse ab_glyph::{FontArc, PxScale};\nuse image::imageops::FilterType;\nuse image::{DynamicImage, GrayImage, ImageReader, Luma, Rgba, RgbaImage};\nuse imageproc::drawing::draw_text_mut;\n\nconst CHARACTER_RAMP: &[u8] = b\"@#8&o:*. \";\nconst MAX_COLUMNS: u32 = 100;\nconst FONT_PATH: &str = \"/System/Library/Fonts/Supplemental/Courier New.ttf\";\nconst FONT_SIZE: f32 = 16.0;\nconst CHARACTER_WIDTH: u32 = 10;\nconst CHARACTER_HEIGHT: u32 = 18;\n\n#[derive(Clone, Copy)]\nenum AsciiMode {\n    BlackAndWhite,\n    Color,\n}\n\nfn luminance(red: u8, green: u8, blue: u8) -> u8 {\n    (0.2126 * red as f32 + 0.7152 * green as f32 + 0.0722 * blue as f32) as u8\n}\n\nfn luminance_to_character(value: u8) -> char {\n    let index = (value as usize * (CHARACTER_RAMP.len() - 1)) / u8::MAX as usize;\n    CHARACTER_RAMP[index] as char\n}\n\nfn contrast_bounds(image: &GrayImage) -> (u8, u8) {\n    let mut values: Vec<u8> = image.pixels().map(|pixel| pixel[0]).collect();\n    values.sort_unstable();\n\n    let last_index = values.len().saturating_sub(1);\n    let black_point = values[last_index * 2 / 100];\n    let white_point = values[last_index * 98 / 100].max(black_point.saturating_add(1));\n\n    (black_point, white_point)\n}\n\nfn normalize_luminance(value: u8, black_point: u8, white_point: u8) -> u8 {\n    if value <= black_point {\n        return 0;\n    }\n    if value >= white_point {\n        return u8::MAX;\n    }\n\n    ((value - black_point) as u16 * u8::MAX as u16\n        / (white_point - black_point) as u16) as u8\n}\n\nfn resized_pixels(image: &DynamicImage) -> (RgbaImage, GrayImage, u32, u32) {\n    let source = image.to_rgba8();\n    let columns = source.width().min(MAX_COLUMNS).max(1);\n    let rows = ((source.height() as f32 * columns as f32 / source.width() as f32) * 0.5)\n        .round()\n        .max(1.0) as u32;\n    let resized = image::imageops::resize(&source, columns, rows, FilterType::Triangle);\n    let grayscale = DynamicImage::ImageRgba8(resized.clone()).to_luma8();\n\n    (resized, grayscale, columns, rows)\n}\n\nfn load_font() -> Result<FontArc, Box<dyn Error>> {\n    FontArc::try_from_vec(fs::read(FONT_PATH)?)\n        .map_err(|_| format!(\"could not load font at {FONT_PATH}\").into())\n}\n\nfn draw_character(\n    canvas: &mut RgbaImage,\n    character: char,\n    color: Rgba<u8>,\n    x: u32,\n    y: u32,\n    font: &FontArc,\n) {\n    draw_text_mut(\n        canvas,\n        color,\n        (x * CHARACTER_WIDTH) as i32,\n        (y * CHARACTER_HEIGHT) as i32,\n        PxScale::from(FONT_SIZE),\n        font,\n        &character.to_string(),\n    );\n}\n\nfn render_ascii(image: &DynamicImage, mode: AsciiMode) -> Result<RgbaImage, Box<dyn Error>> {\n    let (pixels, grayscale, columns, rows) = resized_pixels(image);\n    let (black_point, white_point) = contrast_bounds(&grayscale);\n    let mut output = RgbaImage::from_pixel(\n        columns * CHARACTER_WIDTH,\n        rows * CHARACTER_HEIGHT,\n        Rgba([0, 0, 0, u8::MAX]),\n    );\n    let font = load_font()?;\n\n    for y in 0..rows {\n        for x in 0..columns {\n            let source_pixel = pixels.get_pixel(x, y);\n            let value = normalize_luminance(grayscale.get_pixel(x, y)[0], black_point, white_point);\n            let character = luminance_to_character(value);\n            let color = match mode {\n                AsciiMode::BlackAndWhite => Rgba([u8::MAX, u8::MAX, u8::MAX, u8::MAX]),\n                AsciiMode::Color => Rgba([\n                    source_pixel[0],\n                    source_pixel[1],\n                    source_pixel[2],\n                    u8::MAX,\n                ]),\n            };\n\n            draw_character(&mut output, character, color, x, y, &font);\n        }\n    }\n\n    Ok(output)\n}\n\nfn load_image(path: impl AsRef<Path>) -> image::ImageResult<DynamicImage> {\n    ImageReader::open(path)?.decode()\n}\n\nfn convert_image_to_ascii(\n    input_path: impl AsRef<Path>,\n    output_path: impl AsRef<Path>,\n    mode: AsciiMode,\n) -> Result<(), Box<dyn Error>> {\n    let image = load_image(input_path)?;\n    let ascii_image = render_ascii(&image, mode)?;\n    ascii_image.save(output_path)?;\n    Ok(())\n}\n\nfn main() {\n    let input_path = \"input_image.png\";\n\n    convert_image_to_ascii(input_path, \"output_image_bw.png\", AsciiMode::BlackAndWhite)\n        .and_then(|_| convert_image_to_ascii(input_path, \"output_image_color.png\", AsciiMode::Color))\n        .unwrap_or_else(|error| eprintln!(\"Error converting image: {error}\"));\n}\nEOF\ncargo run"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Clean ASCII color modes",
+			"type": "shell",
+			"command": "perl",
+			"args": [
+				"-0pi",
+				"-e",
+				"s/, Luma//; s/\\nfn luminance\\(red: u8, green: u8, blue: u8\\) -> u8 \\{\\n    \\(0\\.2126 \\* red as f32 \\+ 0\\.7152 \\* green as f32 \\+ 0\\.0722 \\* blue as f32\\) as u8\\n\\}\\n//",
+				"src/app/features/convert.rs"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Check ASCII modes",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"check"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Inspect Rust project",
+			"type": "shell",
+			"command": "sh",
+			"args": [
+				"-c",
+				"printf '%s\\n' '--- Cargo.toml ---'; sed -n '1,120p' Cargo.toml; printf '%s\\n' '--- source files ---'; find src -type f -maxdepth 4 -print; printf '%s\\n' '--- current source ---'; sed -n '1,220p' src/app/features/convert.rs"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Refactor conversion library",
+			"type": "shell",
+			"command": "sh",
+			"args": [
+				"-c",
+				"mkdir -p src/conversion src/bin\ncat > Cargo.toml <<'EOF'\n[package]\nname = \"ascii_image_converter\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nab_glyph = \"0.2\"\nimage = \"0.25\"\nimageproc = \"0.25\"\nthiserror = \"2\"\n\n[lib]\npath = \"src/lib.rs\"\n\n[[bin]]\nname = \"ascii_image_converter\"\npath = \"src/bin/converter.rs\"\nEOF\ncat > src/lib.rs <<'EOF'\npub mod conversion;\n\npub use conversion::{convert_image_to_png, AsciiMode, AsciiOptions, ConversionError};\nEOF\ncat > src/conversion/mod.rs <<'EOF'\nmod error;\nmod options;\nmod renderer;\n\npub use error::ConversionError;\npub use options::{AsciiMode, AsciiOptions};\npub use renderer::convert_image_to_png;\nEOF\ncat > src/conversion/error.rs <<'EOF'\nuse thiserror::Error;\n\n#[derive(Debug, Error)]\npub enum ConversionError {\n    #[error(\"input is too large: {actual} bytes exceeds the {max} byte limit\")]\n    InputTooLarge { actual: usize, max: usize },\n\n    #[error(\"decoded image is too large: {actual} pixels exceeds the {max} pixel limit\")]\n    ImageTooLarge { actual: u64, max: u64 },\n\n    #[error(\"image decoding failed: {0}\")]\n    Image(#[from] image::ImageError),\n\n    #[error(\"a font is required to render ASCII output\")]\n    MissingFont,\n\n    #[error(\"font data is invalid\")]\n    InvalidFont,\n\n    #[error(\"invalid conversion options: {0}\")]\n    InvalidOptions(&'static str),\n}\nEOF\ncat > src/conversion/options.rs <<'EOF'\n#[derive(Clone, Copy, Debug, Eq, PartialEq)]\npub enum AsciiMode {\n    BlackAndWhite,\n    Color,\n}\n\n#[derive(Clone, Debug)]\npub struct AsciiOptions {\n    pub mode: AsciiMode,\n    pub max_columns: u32,\n    pub font_size: f32,\n    pub character_width: u32,\n    pub character_height: u32,\n    pub max_input_bytes: usize,\n    pub max_input_pixels: u64,\n}\n\nimpl Default for AsciiOptions {\n    fn default() -> Self {\n        Self {\n            mode: AsciiMode::BlackAndWhite,\n            max_columns: 100,\n            font_size: 16.0,\n            character_width: 10,\n            character_height: 18,\n            max_input_bytes: 10 * 1024 * 1024,\n            max_input_pixels: 16_000_000,\n        }\n    }\n}\n\nimpl AsciiOptions {\n    pub fn validate(&self) -> Result<(), &'static str> {\n        if self.max_columns == 0 {\n            return Err(\"max_columns must be greater than zero\");\n        }\n        if self.font_size <= 0.0 {\n            return Err(\"font_size must be greater than zero\");\n        }\n        if self.character_width == 0 || self.character_height == 0 {\n            return Err(\"character dimensions must be greater than zero\");\n        }\n        if self.max_input_bytes == 0 || self.max_input_pixels == 0 {\n            return Err(\"input limits must be greater than zero\");\n        }\n        Ok(())\n    }\n}\nEOF\ncat > src/conversion/renderer.rs <<'EOF'\nuse std::io::Cursor;\n\nuse ab_glyph::{FontArc, PxScale};\nuse image::imageops::FilterType;\nuse image::{DynamicImage, GrayImage, ImageFormat, ImageReader, Rgba, RgbaImage};\nuse imageproc::drawing::draw_text_mut;\n\nuse super::{AsciiMode, AsciiOptions, ConversionError};\n\nconst CHARACTER_RAMP: &[u8] = b\"@#8&o:*. \";\n\npub fn convert_image_to_png(\n    input: &[u8],\n    font_data: &[u8],\n    options: &AsciiOptions,\n) -> Result<Vec<u8>, ConversionError> {\n    options\n        .validate()\n        .map_err(ConversionError::InvalidOptions)?;\n\n    if input.len() > options.max_input_bytes {\n        return Err(ConversionError::InputTooLarge {\n            actual: input.len(),\n            max: options.max_input_bytes,\n        });\n    }\n    if font_data.is_empty() {\n        return Err(ConversionError::MissingFont);\n    }\n\n    let image = ImageReader::new(Cursor::new(input))\n        .with_guessed_format()\n        .map_err(image::ImageError::IoError)?\n        .decode()?;\n    let pixels = u64::from(image.width()) * u64::from(image.height());\n    if pixels > options.max_input_pixels {\n        return Err(ConversionError::ImageTooLarge {\n            actual: pixels,\n            max: options.max_input_pixels,\n        });\n    }\n\n    let rendered = render_ascii(&image, font_data, options)?;\n    let mut output = Cursor::new(Vec::new());\n    rendered.write_to(&mut output, ImageFormat::Png)?;\n    Ok(output.into_inner())\n}\n\nfn render_ascii(\n    image: &DynamicImage,\n    font_data: &[u8],\n    options: &AsciiOptions,\n) -> Result<RgbaImage, ConversionError> {\n    let source = image.to_rgba8();\n    let columns = source.width().min(options.max_columns).max(1);\n    let rows = ((source.height() as f32 * columns as f32 / source.width() as f32) * 0.5)\n        .round()\n        .max(1.0) as u32;\n    let resized = image::imageops::resize(&source, columns, rows, FilterType::Triangle);\n    let grayscale = DynamicImage::ImageRgba8(resized.clone()).to_luma8();\n    let (black_point, white_point) = contrast_bounds(&grayscale);\n    let font = FontArc::try_from_vec(font_data.to_vec()).map_err(|_| ConversionError::InvalidFont)?;\n    let mut output = RgbaImage::from_pixel(\n        columns * options.character_width,\n        rows * options.character_height,\n        Rgba([0, 0, 0, u8::MAX]),\n    );\n\n    for y in 0..rows {\n        for x in 0..columns {\n            let source_pixel = resized.get_pixel(x, y);\n            let value = normalize_luminance(\n                grayscale.get_pixel(x, y)[0],\n                black_point,\n                white_point,\n            );\n            let character = luminance_to_character(value);\n            let color = match options.mode {\n                AsciiMode::BlackAndWhite => Rgba([u8::MAX, u8::MAX, u8::MAX, u8::MAX]),\n                AsciiMode::Color => Rgba([\n                    source_pixel[0],\n                    source_pixel[1],\n                    source_pixel[2],\n                    u8::MAX,\n                ]),\n            };\n\n            draw_text_mut(\n                &mut output,\n                color,\n                (x * options.character_width) as i32,\n                (y * options.character_height) as i32,\n                PxScale::from(options.font_size),\n                &font,\n                &character.to_string(),\n            );\n        }\n    }\n\n    Ok(output)\n}\n\nfn luminance_to_character(value: u8) -> char {\n    let index = (value as usize * (CHARACTER_RAMP.len() - 1)) / u8::MAX as usize;\n    CHARACTER_RAMP[index] as char\n}\n\nfn contrast_bounds(image: &GrayImage) -> (u8, u8) {\n    let mut values: Vec<u8> = image.pixels().map(|pixel| pixel[0]).collect();\n    values.sort_unstable();\n    let last_index = values.len().saturating_sub(1);\n    let black_point = values[last_index * 2 / 100];\n    let white_point = values[last_index * 98 / 100].max(black_point.saturating_add(1));\n    (black_point, white_point)\n}\n\nfn normalize_luminance(value: u8, black_point: u8, white_point: u8) -> u8 {\n    if value <= black_point {\n        return 0;\n    }\n    if value >= white_point {\n        return u8::MAX;\n    }\n    ((value - black_point) as u16 * u8::MAX as u16\n        / (white_point - black_point) as u16) as u8\n}\nEOF\ncat > src/bin/converter.rs <<'EOF'\nuse std::env;\nuse std::error::Error;\nuse std::fs;\n\nuse ascii_image_converter::{convert_image_to_png, AsciiMode, AsciiOptions};\n\nfn main() -> Result<(), Box<dyn Error>> {\n    let input_path = env::args()\n        .nth(1)\n        .unwrap_or_else(|| \"input_image.png\".to_owned());\n    let output_path = env::args()\n        .nth(2)\n        .unwrap_or_else(|| \"output_image.png\".to_owned());\n    let mode = match env::var(\"ASCII_MODE\").as_deref() {\n        Ok(\"color\") => AsciiMode::Color,\n        Ok(\"black_and_white\") | Ok(\"bw\") | Err(_) => AsciiMode::BlackAndWhite,\n        Ok(value) => return Err(format!(\"unsupported ASCII_MODE: {value}\").into()),\n    };\n    let font_path = env::var(\"ASCII_FONT_PATH\")\n        .map_err(|_| \"ASCII_FONT_PATH must point to a .ttf font file\")?;\n\n    let mut options = AsciiOptions {\n        mode,\n        ..AsciiOptions::default()\n    };\n    options.max_columns = 100;\n\n    let input = fs::read(input_path)?;\n    let font = fs::read(font_path)?;\n    let output = convert_image_to_png(&input, &font, &options)?;\n    fs::write(output_path, output)?;\n    println!(\"ASCII image created successfully\");\n    Ok(())\n}\nEOF\nrm -f src/app/features/convert.rs\ncargo fmt\ncargo check"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Create Rust modules",
+			"type": "shell",
+			"command": "mkdir",
+			"args": [
+				"-p",
+				"src/conversion",
+				"src/bin"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Write Cargo manifest",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"-c",
+				"cat > Cargo.toml <<'EOF'\n[package]\nname = \"ascii_image_converter\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nab_glyph = \"0.2\"\nimage = \"0.25\"\nimageproc = \"0.25\"\nthiserror = \"2\"\n\n[lib]\npath = \"src/lib.rs\"\n\n[[bin]]\nname = \"ascii_image_converter\"\npath = \"src/bin/converter.rs\"\nEOF"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Write conversion API",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"-c",
+				"cat > src/lib.rs <<'EOF'\npub mod conversion;\npub use conversion::{convert_image_to_png, AsciiMode, AsciiOptions, ConversionError};\nEOF\ncat > src/conversion/mod.rs <<'EOF'\nmod error;\nmod options;\nmod renderer;\npub use error::ConversionError;\npub use options::{AsciiMode, AsciiOptions};\npub use renderer::convert_image_to_png;\nEOF\ncat > src/conversion/error.rs <<'EOF'\nuse thiserror::Error;\n#[derive(Debug, Error)]\npub enum ConversionError {\n    #[error(\"input is too large: {actual} bytes exceeds the {max} byte limit\")]\n    InputTooLarge { actual: usize, max: usize },\n    #[error(\"decoded image is too large: {actual} pixels exceeds the {max} pixel limit\")]\n    ImageTooLarge { actual: u64, max: u64 },\n    #[error(\"image decoding failed: {0}\")]\n    Image(#[from] image::ImageError),\n    #[error(\"a font is required to render ASCII output\")]\n    MissingFont,\n    #[error(\"font data is invalid\")]\n    InvalidFont,\n    #[error(\"invalid conversion options: {0}\")]\n    InvalidOptions(&'static str),\n}\nEOF\ncat > src/conversion/options.rs <<'EOF'\n#[derive(Clone, Copy, Debug, Eq, PartialEq)]\npub enum AsciiMode { BlackAndWhite, Color }\n#[derive(Clone, Debug)]\npub struct AsciiOptions {\n    pub mode: AsciiMode,\n    pub max_columns: u32,\n    pub font_size: f32,\n    pub character_width: u32,\n    pub character_height: u32,\n    pub max_input_bytes: usize,\n    pub max_input_pixels: u64,\n}\nimpl Default for AsciiOptions {\n    fn default() -> Self { Self { mode: AsciiMode::BlackAndWhite, max_columns: 100, font_size: 16.0, character_width: 10, character_height: 18, max_input_bytes: 10 * 1024 * 1024, max_input_pixels: 16_000_000 } }\n}\nimpl AsciiOptions {\n    pub fn validate(&self) -> Result<(), &'static str> {\n        if self.max_columns == 0 { return Err(\"max_columns must be greater than zero\"); }\n        if self.font_size <= 0.0 { return Err(\"font_size must be greater than zero\"); }\n        if self.character_width == 0 || self.character_height == 0 { return Err(\"character dimensions must be greater than zero\"); }\n        if self.max_input_bytes == 0 || self.max_input_pixels == 0 { return Err(\"input limits must be greater than zero\"); }\n        Ok(())\n    }\n}\nEOF"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Write renderer",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"-c",
+				"cat > src/conversion/renderer.rs <<'EOF'\nuse std::io::Cursor;\nuse ab_glyph::{FontArc, PxScale};\nuse image::imageops::FilterType;\nuse image::{DynamicImage, GrayImage, ImageFormat, ImageReader, Rgba, RgbaImage};\nuse imageproc::drawing::draw_text_mut;\nuse super::{AsciiMode, AsciiOptions, ConversionError};\nconst CHARACTER_RAMP: &[u8] = b\"@#8&o:*. \";\n\npub fn convert_image_to_png(input: &[u8], font_data: &[u8], options: &AsciiOptions) -> Result<Vec<u8>, ConversionError> {\n    options.validate().map_err(ConversionError::InvalidOptions)?;\n    if input.len() > options.max_input_bytes { return Err(ConversionError::InputTooLarge { actual: input.len(), max: options.max_input_bytes }); }\n    if font_data.is_empty() { return Err(ConversionError::MissingFont); }\n    let image = ImageReader::new(Cursor::new(input)).with_guessed_format().map_err(image::ImageError::IoError)?.decode()?;\n    let pixels = u64::from(image.width()) * u64::from(image.height());\n    if pixels > options.max_input_pixels { return Err(ConversionError::ImageTooLarge { actual: pixels, max: options.max_input_pixels }); }\n    let rendered = render_ascii(&image, font_data, options)?;\n    let mut output = Cursor::new(Vec::new());\n    rendered.write_to(&mut output, ImageFormat::Png)?;\n    Ok(output.into_inner())\n}\n\nfn render_ascii(image: &DynamicImage, font_data: &[u8], options: &AsciiOptions) -> Result<RgbaImage, ConversionError> {\n    let source = image.to_rgba8();\n    let columns = source.width().min(options.max_columns).max(1);\n    let rows = ((source.height() as f32 * columns as f32 / source.width() as f32) * 0.5).round().max(1.0) as u32;\n    let resized = image::imageops::resize(&source, columns, rows, FilterType::Triangle);\n    let grayscale = DynamicImage::ImageRgba8(resized.clone()).to_luma8();\n    let (black_point, white_point) = contrast_bounds(&grayscale);\n    let font = FontArc::try_from_vec(font_data.to_vec()).map_err(|_| ConversionError::InvalidFont)?;\n    let mut output = RgbaImage::from_pixel(columns * options.character_width, rows * options.character_height, Rgba([0, 0, 0, u8::MAX]));\n    for y in 0..rows { for x in 0..columns {\n        let pixel = resized.get_pixel(x, y);\n        let value = normalize_luminance(grayscale.get_pixel(x, y)[0], black_point, white_point);\n        let index = (value as usize * (CHARACTER_RAMP.len() - 1)) / u8::MAX as usize;\n        let color = match options.mode { AsciiMode::BlackAndWhite => Rgba([u8::MAX; 4]), AsciiMode::Color => Rgba([pixel[0], pixel[1], pixel[2], u8::MAX]) };\n        draw_text_mut(&mut output, color, (x * options.character_width) as i32, (y * options.character_height) as i32, PxScale::from(options.font_size), &font, &(CHARACTER_RAMP[index] as char).to_string());\n    }}\n    Ok(output)\n}\n\nfn contrast_bounds(image: &GrayImage) -> (u8, u8) {\n    let mut values: Vec<u8> = image.pixels().map(|pixel| pixel[0]).collect();\n    values.sort_unstable();\n    let last = values.len().saturating_sub(1);\n    let black = values[last * 2 / 100];\n    let white = values[last * 98 / 100].max(black.saturating_add(1));\n    (black, white)\n}\nfn normalize_luminance(value: u8, black: u8, white: u8) -> u8 {\n    if value <= black { return 0; }\n    if value >= white { return u8::MAX; }\n    ((value - black) as u16 * u8::MAX as u16 / (white - black) as u16) as u8\n}\nEOF"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Write converter CLI",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"-c",
+				"cat > src/bin/converter.rs <<'EOF'\nuse std::env;\nuse std::error::Error;\nuse std::fs;\nuse ascii_image_converter::{convert_image_to_png, AsciiMode, AsciiOptions};\nfn main() -> Result<(), Box<dyn Error>> {\n    let mut args = env::args().skip(1);\n    let input_path = args.next().unwrap_or_else(|| \"input_image.png\".to_owned());\n    let output_path = args.next().unwrap_or_else(|| \"output_image.png\".to_owned());\n    let mode = match env::var(\"ASCII_MODE\").as_deref() {\n        Ok(\"color\") => AsciiMode::Color,\n        Ok(\"black_and_white\") | Ok(\"bw\") | Err(_) => AsciiMode::BlackAndWhite,\n        Ok(value) => return Err(format!(\"unsupported ASCII_MODE: {value}\").into()),\n    };\n    let font_path = env::var(\"ASCII_FONT_PATH\").map_err(|_| \"ASCII_FONT_PATH must point to a .ttf font file\")?;\n    let input = fs::read(input_path)?;\n    let font = fs::read(font_path)?;\n    let output = convert_image_to_png(&input, &font, &AsciiOptions { mode, ..AsciiOptions::default() })?;\n    fs::write(output_path, output)?;\n    println!(\"ASCII image created successfully\");\n    Ok(())\n}\nEOF\nrm -f src/app/features/convert.rs\ncargo fmt\ncargo check"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Restore library modules",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"-c",
+				"printf '%s\\n' 'pub mod conversion;' 'pub use conversion::{convert_image_to_png, AsciiMode, AsciiOptions, ConversionError};' > src/lib.rs\nprintf '%s\\n' 'mod error;' 'mod options;' 'mod renderer;' 'pub use error::ConversionError;' 'pub use options::{AsciiMode, AsciiOptions};' 'pub use renderer::convert_image_to_png;' > src/conversion/mod.rs\ncat > src/conversion/error.rs <<'EOF'\nuse thiserror::Error;\n#[derive(Debug, Error)]\npub enum ConversionError {\n    #[error(\"input is too large: {actual} bytes exceeds the {max} byte limit\")]\n    InputTooLarge { actual: usize, max: usize },\n    #[error(\"decoded image is too large: {actual} pixels exceeds the {max} pixel limit\")]\n    ImageTooLarge { actual: u64, max: u64 },\n    #[error(\"image decoding failed: {0}\")]\n    Image(#[from] image::ImageError),\n    #[error(\"a font is required to render ASCII output\")]\n    MissingFont,\n    #[error(\"font data is invalid\")]\n    InvalidFont,\n    #[error(\"invalid conversion options: {0}\")]\n    InvalidOptions(&'static str),\n}\nEOF\ncat > src/conversion/options.rs <<'EOF'\n#[derive(Clone, Copy, Debug, Eq, PartialEq)]\npub enum AsciiMode { BlackAndWhite, Color }\n#[derive(Clone, Debug)]\npub struct AsciiOptions { pub mode: AsciiMode, pub max_columns: u32, pub font_size: f32, pub character_width: u32, pub character_height: u32, pub max_input_bytes: usize, pub max_input_pixels: u64 }\nimpl Default for AsciiOptions { fn default() -> Self { Self { mode: AsciiMode::BlackAndWhite, max_columns: 100, font_size: 16.0, character_width: 10, character_height: 18, max_input_bytes: 10 * 1024 * 1024, max_input_pixels: 16_000_000 } } }\nimpl AsciiOptions { pub fn validate(&self) -> Result<(), &'static str> { if self.max_columns == 0 { return Err(\"max_columns must be greater than zero\"); } if self.font_size <= 0.0 { return Err(\"font_size must be greater than zero\"); } if self.character_width == 0 || self.character_height == 0 { return Err(\"character dimensions must be greater than zero\"); } if self.max_input_bytes == 0 || self.max_input_pixels == 0 { return Err(\"input limits must be greater than zero\"); } Ok(()) } }\nEOF\ncargo fmt\ncargo check"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Write refactor modules",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"-e",
+				"require(\"fs\").writeFileSync(\"src/lib.rs\",String.raw`pub mod conversion;\npub use conversion::{convert_image_to_png, AsciiMode, AsciiOptions, ConversionError};\n`); require(\"fs\").writeFileSync(\"src/conversion/mod.rs\",String.raw`mod error;\nmod options;\nmod renderer;\npub use error::ConversionError;\npub use options::{AsciiMode, AsciiOptions};\npub use renderer::convert_image_to_png;\n`); require(\"fs\").writeFileSync(\"src/conversion/error.rs\",String.raw`use thiserror::Error;\n#[derive(Debug, Error)]\npub enum ConversionError {\n    #[error(\"input is too large: {actual} bytes exceeds the {max} byte limit\")]\n    InputTooLarge { actual: usize, max: usize },\n    #[error(\"decoded image is too large: {actual} pixels exceeds the {max} pixel limit\")]\n    ImageTooLarge { actual: u64, max: u64 },\n    #[error(\"image decoding failed: {0}\")]\n    Image(#[from] image::ImageError),\n    #[error(\"a font is required to render ASCII output\")]\n    MissingFont,\n    #[error(\"font data is invalid\")]\n    InvalidFont,\n    #[error(\"invalid conversion options: {0}\")]\n    InvalidOptions(&'static str),\n}\n`); require(\"fs\").writeFileSync(\"src/conversion/options.rs\",String.raw`#[derive(Clone, Copy, Debug, Eq, PartialEq)]\npub enum AsciiMode { BlackAndWhite, Color }\n#[derive(Clone, Debug)]\npub struct AsciiOptions {\n    pub mode: AsciiMode,\n    pub max_columns: u32,\n    pub font_size: f32,\n    pub character_width: u32,\n    pub character_height: u32,\n    pub max_input_bytes: usize,\n    pub max_input_pixels: u64,\n}\nimpl Default for AsciiOptions {\n    fn default() -> Self { Self { mode: AsciiMode::BlackAndWhite, max_columns: 100, font_size: 16.0, character_width: 10, character_height: 18, max_input_bytes: 10 * 1024 * 1024, max_input_pixels: 16_000_000 } }\n}\nimpl AsciiOptions {\n    pub fn validate(&self) -> Result<(), &'static str> {\n        if self.max_columns == 0 { return Err(\"max_columns must be greater than zero\"); }\n        if self.font_size <= 0.0 { return Err(\"font_size must be greater than zero\"); }\n        if self.character_width == 0 || self.character_height == 0 { return Err(\"character dimensions must be greater than zero\"); }\n        if self.max_input_bytes == 0 || self.max_input_pixels == 0 { return Err(\"input limits must be greater than zero\"); }\n        Ok(())\n    }\n}\n`);"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Write library modules",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"-e",
+				"require(\"fs\").writeFileSync(\"src/lib.rs\",String.raw`pub mod conversion;\npub use conversion::{convert_image_to_png, AsciiMode, AsciiOptions, ConversionError};\n`); require(\"fs\").writeFileSync(\"src/conversion/mod.rs\",String.raw`mod error;\nmod options;\nmod renderer;\npub use error::ConversionError;\npub use options::{AsciiMode, AsciiOptions};\npub use renderer::convert_image_to_png;\n`); require(\"fs\").writeFileSync(\"src/conversion/error.rs\",String.raw`use thiserror::Error;\n#[derive(Debug, Error)]\npub enum ConversionError {\n    #[error(\"input is too large: {actual} bytes exceeds the {max} byte limit\")]\n    InputTooLarge { actual: usize, max: usize },\n    #[error(\"decoded image is too large: {actual} pixels exceeds the {max} pixel limit\")]\n    ImageTooLarge { actual: u64, max: u64 },\n    #[error(\"image decoding failed: {0}\")]\n    Image(#[from] image::ImageError),\n    #[error(\"a font is required to render ASCII output\")]\n    MissingFont,\n    #[error(\"font data is invalid\")]\n    InvalidFont,\n    #[error(\"invalid conversion options: {0}\")]\n    InvalidOptions(String),\n}\n`); require(\"fs\").writeFileSync(\"src/conversion/options.rs\",String.raw`#[derive(Clone, Copy, Debug, Eq, PartialEq)]\npub enum AsciiMode { BlackAndWhite, Color }\n#[derive(Clone, Debug)]\npub struct AsciiOptions {\n    pub mode: AsciiMode,\n    pub max_columns: u32,\n    pub font_size: f32,\n    pub character_width: u32,\n    pub character_height: u32,\n    pub max_input_bytes: usize,\n    pub max_input_pixels: u64,\n}\nimpl Default for AsciiOptions {\n    fn default() -> Self { Self { mode: AsciiMode::BlackAndWhite, max_columns: 100, font_size: 16.0, character_width: 10, character_height: 18, max_input_bytes: 10 * 1024 * 1024, max_input_pixels: 16_000_000 } }\n}\nimpl AsciiOptions {\n    pub fn validate(&self) -> Result<(), String> {\n        if self.max_columns == 0 { return Err(\"max_columns must be greater than zero\".to_owned()); }\n        if self.font_size <= 0.0 { return Err(\"font_size must be greater than zero\".to_owned()); }\n        if self.character_width == 0 || self.character_height == 0 { return Err(\"character dimensions must be greater than zero\".to_owned()); }\n        if self.max_input_bytes == 0 || self.max_input_pixels == 0 { return Err(\"input limits must be greater than zero\".to_owned()); }\n        Ok(())\n    }\n}\n`);"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Validate refactored Rust API",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"fmt",
+				"--",
+				"--check"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Format and compile Rust API",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"fmt"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Compile Rust API",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"check"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Document conversion API",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"-e",
+				"require(\"fs\").writeFileSync(\"README.md\",String.raw`# ASCII image converter\n\nRust library and CLI for converting PNG and other supported image formats into rendered ASCII PNG images.\n\n## Library API\n\nThe web layer should pass uploaded image bytes and font bytes directly to the library:\n\n~~~rust\nuse ascii_image_converter::{convert_image_to_png, AsciiMode, AsciiOptions};\n\nlet options = AsciiOptions {\n    mode: AsciiMode::Color,\n    ..AsciiOptions::default()\n};\nlet output_png = convert_image_to_png(&image_bytes, &font_bytes, &options)?;\n~~~\n\nThe function returns PNG bytes suitable for an HTTP response. It performs input-byte and decoded-pixel limit checks before rendering. Configure the limits through `AsciiOptions` for the web application policy.\n\nThe font is supplied by the caller, so the library has no operating-system-specific font path. A web application can load a bundled, licensed font during startup and reuse its bytes for requests.\n\n## CLI\n\nThe CLI reads a local input file and writes a local output file. It requires a TrueType font path through `ASCII_FONT_PATH`:\n\n~~~sh\nASCII_FONT_PATH=/path/to/monospace.ttf cargo run -- input_image.png output_image.png\nASCII_FONT_PATH=/path/to/monospace.ttf ASCII_MODE=color cargo run -- input_image.png output_image.png\n~~~\n\nSupported modes are `black_and_white` (the default), `bw`, and `color`.\n\n## Project layout\n\n~~~text\nsrc/lib.rs                    Public library API\nsrc/conversion/options.rs     Modes, rendering options, and resource limits\nsrc/conversion/error.rs       Typed conversion errors\nsrc/conversion/renderer.rs    In-memory image conversion\nsrc/bin/converter.rs          Local file CLI adapter\n~~~\n`);"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Write API documentation",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"-c",
+				"cat > README.md <<'EOF'\n# ASCII image converter\n\nRust library and CLI for converting images into rendered ASCII PNG images.\n\n## Library API\n\nThe web layer should pass uploaded image bytes and font bytes directly to the library:\n\n~~~rust\nuse ascii_image_converter::{convert_image_to_png, AsciiMode, AsciiOptions};\n\nlet options = AsciiOptions {\n    mode: AsciiMode::Color,\n    ..AsciiOptions::default()\n};\nlet output_png = convert_image_to_png(&image_bytes, &font_bytes, &options)?;\n~~~\n\nThe function returns PNG bytes suitable for an HTTP response. It enforces input-byte and decoded-pixel limits before rendering. Configure those limits through `AsciiOptions` for the web application policy.\n\nThe font is supplied by the caller, so the library has no operating-system-specific font path. A web application can load a bundled, licensed font during startup and reuse its bytes for requests.\n\n## CLI\n\nThe CLI reads a local input file and writes a local output file. It requires a TrueType font path through `ASCII_FONT_PATH`:\n\n~~~sh\nASCII_FONT_PATH=/path/to/monospace.ttf cargo run -- input_image.png output_image.png\nASCII_FONT_PATH=/path/to/monospace.ttf ASCII_MODE=color cargo run -- input_image.png output_image.png\n~~~\n\nSupported modes are `black_and_white` (the default), `bw`, and `color`.\n\n## Project layout\n\n~~~text\nsrc/lib.rs                    Public library API\nsrc/conversion/options.rs     Modes, rendering options, and resource limits\nsrc/conversion/error.rs       Typed conversion errors\nsrc/conversion/renderer.rs    In-memory image conversion\nsrc/bin/converter.rs         Local file CLI adapter\n~~~\nEOF"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Fix API documentation",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"-c",
+				"sed -i 's/`//g' README.md"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Strip documentation markers",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"-e",
+				"let fs=require(\"fs\");let p=fs.readFileSync(\"README.md\",\"utf8\");fs.writeFileSync(\"README.md\",p.replaceAll(String.fromCharCode(96),\"\"))"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Compile refactored library",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"fmt"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Check refactored library",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"check"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Complete API documentation",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"-e",
+				"let fs=require(\"fs\");let p=fs.readFileSync(\"README.md\",\"utf8\");p=p.replace(\"through  for the web\", \"through AsciiOptions for the web\").replace(\"through :\", \"through ASCII_FONT_PATH:\").replace(\"Supported modes are  (the default), , and .\", \"Supported modes are black_and_white (the default), bw, and color.\");fs.writeFileSync(\"README.md\",p)"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Harden rendering limits",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"-e",
+				"let fs=require(\"fs\");let p=fs.readFileSync(\"src/conversion/options.rs\",\"utf8\");p=p.replace(\"if self.max_columns == 0 {\", \"if self.max_columns == 0 || self.max_columns > 1000 {\").replace(\"max_columns must be greater than zero\", \"max_columns must be between 1 and 1000\").replace(\"if self.character_width == 0 || self.character_height == 0 {\", \"if self.character_width == 0 || self.character_height == 0 || self.character_width > 256 || self.character_height > 256 {\").replace(\"character dimensions must be greater than zero\", \"character dimensions must be between 1 and 256\");fs.writeFileSync(\"src/conversion/options.rs\",p)"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Final Rust validation",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"check"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Test converter CLI",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"-c",
+				"set -e\nFONT_PATH=\"/System/Library/Fonts/Supplemental/Courier New.ttf\"\nif [ ! -f \"$FONT_PATH\" ]; then FONT_PATH=\"/System/Library/Fonts/Monaco.dfont\"; fi\nASCII_FONT_PATH=\"$FONT_PATH\" cargo run -- input_image.png test_output_bw.png\nASCII_FONT_PATH=\"$FONT_PATH\" ASCII_MODE=color cargo run -- input_image.png test_output_color.png\nfile test_output_bw.png test_output_color.png"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Test resized PNG conversion",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"-c",
+				"set -e\nsips -Z 2000 input_image.png --out test_input.png >/dev/null\nFONT_PATH=\"/System/Library/Fonts/Supplemental/Courier New.ttf\"\nASCII_FONT_PATH=\"$FONT_PATH\" cargo run -- test_input.png test_output_bw.png\nASCII_FONT_PATH=\"$FONT_PATH\" ASCII_MODE=color cargo run -- test_input.png test_output_color.png\nfile test_input.png test_output_bw.png test_output_color.png"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Clean test artifacts",
+			"type": "shell",
+			"command": "rm",
+			"args": [
+				"-f",
+				"test_input.png",
+				"test_output_bw.png",
+				"test_output_color.png"
+			],
+			"isBackground": false,
+			"problemMatcher": []
 		}
 	]
 }
