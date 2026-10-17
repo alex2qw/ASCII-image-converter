@@ -1,0 +1,13 @@
+[package]
+name = "ascii_image_converter"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+image = "0.25"
+imageproc = "0.25"
+ab_glyph = "0.2"
+
+[[bin]]
+name = "ascii_image_converter"
+path = "src/app/features/convert.rs"

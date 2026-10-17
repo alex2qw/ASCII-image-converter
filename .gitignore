@@ -1,0 +1,16 @@
+# Rust build output
+/target/
+
+# Locally compiled test binary
+/convert-test
+
+# Generated ASCII image output
+/output_image.png
+/output_image.txt
+
+# Local input images
+/input_image.png
+/input_image.rgb
+
+# macOS files
+.DS_Store

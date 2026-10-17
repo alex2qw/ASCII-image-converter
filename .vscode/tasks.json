@@ -1,0 +1,88 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Test ASCII converter",
+			"type": "shell",
+			"command": "rustc",
+			"args": [
+				"src/app/features/convert.rs",
+				"-o",
+				"convert-test",
+				"&&",
+				"./convert-test"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Add PNG support",
+			"type": "shell",
+			"command": "sh",
+			"args": [
+				"-c",
+				"cat > Cargo.toml <<'EOF'\n[package]\nname = \"ascii_image_converter\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nimage = \"0.25\"\n\n[[bin]]\nname = \"ascii_image_converter\"\npath = \"src/app/features/convert.rs\"\nEOF\ncat > src/app/features/convert.rs <<'EOF'\nuse std::fs;\nuse std::io;\nuse std::path::Path;\n\nuse image::ImageReader;\n\nconst CHARACTER_RAMP: &[u8] = b\"@%#*+=-:. \";\n\nfn calculate_luminance(r: u8, g: u8, b: u8) -> f32 {\n    0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32\n}\n\nfn convert_to_ascii(image: &image::DynamicImage) -> String {\n    let grayscale_image = image.to_luma8();\n    let (width, _) = grayscale_image.dimensions();\n    let mut ascii_data = String::new();\n\n    for (pixel_index, pixel) in grayscale_image.pixels().enumerate() {\n        let luminance = pixel[0];\n        let ramp_index =\n            (luminance as usize * (CHARACTER_RAMP.len() - 1)) / u8::MAX as usize;\n        ascii_data.push(CHARACTER_RAMP[ramp_index] as char);\n\n        if (pixel_index + 1) % width as usize == 0 {\n            ascii_data.push('\\n');\n        }\n    }\n\n    ascii_data\n}\n\nfn load_image(path: impl AsRef<Path>) -> image::ImageResult<image::DynamicImage> {\n    ImageReader::open(path)?.decode()\n}\n\nfn save_ascii(path: impl AsRef<Path>, ascii_data: &str) -> io::Result<()> {\n    fs::write(path, ascii_data)\n}\n\nfn convert_image_to_ascii(input_path: impl AsRef<Path>, output_path: impl AsRef<Path>) -> Result<(), Box<dyn std::error::Error>> {\n    let image = load_image(input_path)?;\n    let ascii_data = convert_to_ascii(&image);\n    save_ascii(output_path, &ascii_data)?;\n    Ok(())\n}\n\nfn main() {\n    let input_path = \"input_image.png\";\n    let output_path = \"output_image.txt\";\n\n    match convert_image_to_ascii(input_path, output_path) {\n        Ok(()) => println!(\"Image converted to ASCII successfully!\"),\n        Err(error) => eprintln!(\"Error converting image: {error}\"),\n    }\n}\nEOF\ncargo run"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Build PNG converter",
+			"type": "shell",
+			"command": "sh",
+			"args": [
+				"-c",
+				"sed -i '9,11d; s/ascii_data.push(n);/ascii_data.push(char::from_u32(10).unwrap());/' src/app/features/convert.rs && cargo run"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Fix PNG newline",
+			"type": "shell",
+			"command": "perl",
+			"args": [
+				"-0pi",
+				"-e",
+				"s/ascii_data\\.push\\(n\\);/ascii_data.push(10 as char);/",
+				"src/app/features/convert.rs"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Run PNG converter",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"run"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Clean PNG converter",
+			"type": "shell",
+			"command": "perl",
+			"args": [
+				"-ni",
+				"-e",
+				"print unless $. >= 9 && $. <= 11",
+				"src/app/features/convert.rs"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Render ASCII PNG",
+			"type": "shell",
+			"command": "sh",
+			"args": [
+				"-c",
+				"cat > Cargo.toml <<'EOF'\n[package]\nname = \"ascii_image_converter\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nimage = \"0.25\"\nimageproc = \"0.25\"\nab_glyph = \"0.2\"\n\n[[bin]]\nname = \"ascii_image_converter\"\npath = \"src/app/features/convert.rs\"\nEOF\ncat > src/app/features/convert.rs <<'EOF'\nuse std::error::Error;\nuse std::fs;\nuse std::path::Path;\n\nuse ab_glyph::{FontArc, PxScale};\nuse image::imageops::FilterType;\nuse image::{GrayImage, ImageReader, Luma};\nuse imageproc::drawing::draw_text_mut;\n\nconst CHARACTER_RAMP: &[u8] = b\"@%#*+=-:. \";\nconst MAX_COLUMNS: u32 = 160;\nconst FONT_PATH: &str = \"/System/Library/Fonts/Supplemental/Courier New.ttf\";\nconst FONT_SIZE: f32 = 14.0;\nconst CHARACTER_WIDTH: u32 = 8;\nconst CHARACTER_HEIGHT: u32 = 16;\n\nfn luminance_to_character(luminance: u8) -> char {\n    let ramp_index =\n        (luminance as usize * (CHARACTER_RAMP.len() - 1)) / u8::MAX as usize;\n    CHARACTER_RAMP[ramp_index] as char\n}\n\nfn convert_to_ascii_image(image: &image::DynamicImage) -> Result<GrayImage, Box<dyn Error>> {\n    let source = image.to_luma8();\n    let columns = source.width().min(MAX_COLUMNS).max(1);\n    let rows = ((source.height() as f32 * columns as f32 / source.width() as f32) * 0.5)\n        .round()\n        .max(1.0) as u32;\n    let resized = image::imageops::resize(&source, columns, rows, FilterType::Triangle);\n    let mut output = GrayImage::from_pixel(\n        columns * CHARACTER_WIDTH,\n        rows * CHARACTER_HEIGHT,\n        Luma([0]),\n    );\n    let font = FontArc::try_from_vec(fs::read(FONT_PATH)?)\n        .map_err(|_| format!(\"could not load font at {FONT_PATH}\"))?;\n    let scale = PxScale::from(FONT_SIZE);\n\n    for (x, y, pixel) in resized.enumerate_pixels() {\n        let character = luminance_to_character(pixel[0]);\n        draw_text_mut(\n            &mut output,\n            Luma([u8::MAX]),\n            (x * CHARACTER_WIDTH) as i32,\n            (y * CHARACTER_HEIGHT) as i32,\n            scale,\n            &font,\n            &character.to_string(),\n        );\n    }\n\n    Ok(output)\n}\n\nfn load_image(path: impl AsRef<Path>) -> image::ImageResult<image::DynamicImage> {\n    ImageReader::open(path)?.decode()\n}\n\nfn convert_image_to_ascii(\n    input_path: impl AsRef<Path>,\n    output_path: impl AsRef<Path>,\n) -> Result<(), Box<dyn Error>> {\n    let image = load_image(input_path)?;\n    let ascii_image = convert_to_ascii_image(&image)?;\n    ascii_image.save(output_path)?;\n    Ok(())\n}\n\nfn main() {\n    let input_path = \"input_image.png\";\n    let output_path = \"output_image.png\";\n\n    match convert_image_to_ascii(input_path, output_path) {\n        Ok(()) => println!(\"Image converted to an ASCII image successfully!\"),\n        Err(error) => eprintln!(\"Error converting image: {error}\"),\n    }\n}\nEOF\ncargo run"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		}
+	]
+}
