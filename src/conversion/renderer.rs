@@ -1,11 +1,9 @@
-use super::{AsciiMode, AsciiOptions, ConversionError};
+use super::{options::parse_background, AsciiMode, AsciiOptions, ConversionError};
 use ab_glyph::{FontArc, PxScale};
 use image::imageops::FilterType;
 use image::{DynamicImage, GrayImage, ImageFormat, ImageReader, Rgba, RgbaImage};
 use imageproc::drawing::draw_text_mut;
 use std::io::Cursor;
-const CHARACTER_RAMP: &[u8] = b"@#8&o:*. ";
-
 pub fn convert_image_to_png(
     input: &[u8],
     font_data: &[u8],
@@ -55,16 +53,25 @@ fn render_ascii(
     let (black_point, white_point) = contrast_bounds(&grayscale);
     let font =
         FontArc::try_from_vec(font_data.to_vec()).map_err(|_| ConversionError::InvalidFont)?;
+    let ramp: Vec<char> = options.ramp.chars().collect();
+    let background =
+        parse_background(&options.background).ok_or(ConversionError::InvalidOptions(
+            "background must be a six-digit hexadecimal color".to_owned(),
+        ))?;
     let mut output = RgbaImage::from_pixel(
         columns * options.character_width,
         rows * options.character_height,
-        Rgba([0, 0, 0, u8::MAX]),
+        Rgba(background),
     );
     for y in 0..rows {
         for x in 0..columns {
             let pixel = resized.get_pixel(x, y);
-            let value = normalize_luminance(grayscale.get_pixel(x, y)[0], black_point, white_point);
-            let index = (value as usize * (CHARACTER_RAMP.len() - 1)) / u8::MAX as usize;
+            let value = adjust_luminance(
+                normalize_luminance(grayscale.get_pixel(x, y)[0], black_point, white_point),
+                options,
+            );
+            let index = (value as usize * (ramp.len() - 1)) / u8::MAX as usize;
+            let character = ramp[index];
             let color = match options.mode {
                 AsciiMode::BlackAndWhite => Rgba([u8::MAX; 4]),
                 AsciiMode::Color => Rgba([pixel[0], pixel[1], pixel[2], u8::MAX]),
@@ -76,7 +83,7 @@ fn render_ascii(
                 (y * options.character_height) as i32,
                 PxScale::from(options.font_size),
                 &font,
-                &(CHARACTER_RAMP[index] as char).to_string(),
+                &character.to_string(),
             );
         }
     }
@@ -99,4 +106,17 @@ fn normalize_luminance(value: u8, black: u8, white: u8) -> u8 {
         return u8::MAX;
     }
     ((value - black) as u16 * u8::MAX as u16 / (white - black) as u16) as u8
+}
+
+fn adjust_luminance(value: u8, options: &AsciiOptions) -> u8 {
+    let centered = value as f32 / 255.0;
+    let contrast = (options.contrast + 100) as f32 / 100.0;
+    let brightness = options.brightness as f32 / 100.0;
+    let adjusted = ((centered - 0.5) * contrast + 0.5 + brightness).clamp(0.0, 1.0);
+    let adjusted = if options.invert {
+        1.0 - adjusted
+    } else {
+        adjusted
+    };
+    (adjusted * 255.0).round() as u8
 }

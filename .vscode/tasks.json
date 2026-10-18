@@ -402,6 +402,80 @@
 			],
 			"isBackground": false,
 			"problemMatcher": []
+		},
+		{
+			"label": "Verify frontend project",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"typecheck"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Verify Rust project",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"fmt",
+				"--all",
+				"--",
+				"--check"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Run Rust tests",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"test",
+				"--all-targets"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Build web UI",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"build"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Start Vite UI",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"dev",
+				"--",
+				"--host",
+				"127.0.0.1"
+			],
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Start Rust API",
+			"type": "shell",
+			"command": "env",
+			"args": [
+				"ASCII_FONT_PATH=/System/Library/Fonts/Supplemental/Courier New.ttf",
+				"cargo",
+				"run",
+				"--bin",
+				"server"
+			],
+			"isBackground": true,
+			"problemMatcher": []
 		}
 	]
 }

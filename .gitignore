@@ -1,14 +1,31 @@
 # Rust build output
 /target/
 
-# Locally compiled test binary
+# Locally compiled binaries
 /convert-test
+/ascii_image_converter
+/server
+
+# Node/Vite dependencies and build output
+/node_modules/
+/dist/
+*.tsbuildinfo
+
+# Local environment configuration
+.env
+.env.*
+!.env.example
 
 # Generated ASCII image output
-/output_image.png
-/output_image.txt
+/output_image*.png
+/output_image*.txt
 
-# Local input images
+# Temporary test artifacts
+/test_input.*
+/test_output*.png
+/tmp/
+
+# Local input and test images
 /input_image.png
 /input_image.jpg
 /input_image.jpeg
