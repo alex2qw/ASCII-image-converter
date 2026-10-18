@@ -78,3 +78,26 @@ npm install
 npm run dev
 npm run build
 ~~~
+
+## Run everything with one command
+
+On macOS, make the launcher executable once:
+
+~~~sh
+chmod +x run.sh
+~~~
+
+Then start both the Rust API and the Vite frontend with:
+
+~~~sh
+./run.sh
+~~~
+
+The launcher finds a system TrueType font automatically. To use a specific
+font, set `ASCII_FONT_PATH` before running it:
+
+~~~sh
+ASCII_FONT_PATH=/path/to/monospace.ttf ./run.sh
+~~~
+
+Press `Ctrl+C` to stop both services.
