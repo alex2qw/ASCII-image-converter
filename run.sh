@@ -35,13 +35,13 @@ if [[ -z "${ASCII_FONT_PATH:-}" || ! -f "$ASCII_FONT_PATH" ]]; then
   exit 1
 fi
 
-if [[ ! -d node_modules ]]; then
+if [[ ! -d frontend/node_modules ]]; then
   echo "Installing frontend dependencies..."
-  npm ci
+  (cd frontend && npm ci)
 fi
 
 echo "Starting the Rust API at http://127.0.0.1:3000..."
-ASCII_FONT_PATH="$ASCII_FONT_PATH" cargo run --bin server &
+ASCII_FONT_PATH="$ASCII_FONT_PATH" cargo run --manifest-path backend/Cargo.toml --bin server &
 SERVER_PID=$!
 
 cleanup() {
@@ -61,4 +61,4 @@ fi
 
 echo "Starting the frontend..."
 echo "Open the Vite URL shown below, usually http://localhost:5173"
-npm run dev
+(cd frontend && npm run dev)

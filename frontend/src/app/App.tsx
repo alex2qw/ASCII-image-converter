@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Copy, Download, ImagePlus, Maximize2, Moon, RotateCcw, Sun, Upload, X, Check } from 'lucide-react';
-import { convertImage, type ConvertOptions } from './api';
+import { convertImage, type ConvertOptions } from '../api/convert';
 
 type Preset = { name: string; options: ConvertOptions };
 const defaults: ConvertOptions = { mode: 'black_and_white', max_columns: 100, font_size: 16, character_width: 10, character_height: 18, ramp: '@#8&o:*. ', contrast: 0, brightness: 0, invert: false, background: '#080808' };
