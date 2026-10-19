@@ -2,13 +2,14 @@ use ab_glyph::FontArc;
 use ascii_image_converter::{convert_image_to_png, AsciiOptions, ConversionError};
 use axum::{
     extract::{DefaultBodyLimit, Multipart, State},
-    http::StatusCode,
+    http::{header, HeaderValue, Method, StatusCode},
     response::{IntoResponse, Response},
     routing::post,
     Json, Router,
 };
 use serde::Serialize;
 use std::{env, net::SocketAddr, sync::Arc};
+use tower_http::cors::CorsLayer;
 
 #[derive(Clone)]
 struct AppState {
@@ -71,12 +72,16 @@ struct ServerConfig {
     max_request_bytes: usize,
     max_input_bytes: usize,
     max_input_pixels: u64,
+    allowed_origin: HeaderValue,
 }
 
 impl ServerConfig {
     fn from_env() -> Result<Self, Box<dyn std::error::Error>> {
+        let default_bind = env::var("PORT")
+            .map(|port| format!("0.0.0.0:{port}"))
+            .unwrap_or_else(|_| "127.0.0.1:3000".to_owned());
         let bind = env::var("ASCII_BIND")
-            .unwrap_or_else(|_| "127.0.0.1:3000".to_owned())
+            .unwrap_or(default_bind)
             .parse()?;
         let font_path = env::var("ASCII_FONT_PATH")
             .map_err(|_| "ASCII_FONT_PATH must point to a licensed .ttf font file")?;
@@ -86,6 +91,9 @@ impl ServerConfig {
             max_input_bytes.saturating_add(64 * 1024),
         )?;
         let max_input_pixels = env_u64("ASCII_MAX_INPUT_PIXELS", 16_000_000)?;
+        let allowed_origin = env::var("ASCII_ALLOWED_ORIGIN")
+            .unwrap_or_else(|_| "http://localhost:5173".to_owned())
+            .parse()?;
         if max_request_bytes == 0 || max_input_bytes == 0 || max_input_pixels == 0 {
             return Err("request and input limits must be greater than zero".into());
         }
@@ -95,6 +103,7 @@ impl ServerConfig {
             max_request_bytes,
             max_input_bytes,
             max_input_pixels,
+            allowed_origin,
         })
     }
 }
@@ -122,10 +131,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         max_input_bytes: config.max_input_bytes,
         max_input_pixels: config.max_input_pixels,
     };
+    let cors = CorsLayer::new()
+        .allow_origin(config.allowed_origin)
+        .allow_methods([Method::POST])
+        .allow_headers([header::CONTENT_TYPE, header::ACCEPT]);
     let app = Router::new()
         .route("/convert", post(convert))
         .with_state(state)
-        .layer(DefaultBodyLimit::max(config.max_request_bytes));
+        .layer(DefaultBodyLimit::max(config.max_request_bytes))
+        .layer(cors);
     let listener = tokio::net::TcpListener::bind(config.bind).await?;
     println!(
         "ASCII image converter listening on {}",

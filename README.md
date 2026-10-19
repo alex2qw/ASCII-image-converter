@@ -1,6 +1,42 @@
-# ASCII image converter
+# ASCII Studio
 
-Rust library and CLI for converting images into rendered ASCII PNG images.
+Convert images into customizable ASCII art in the browser.
+
+**Live demo:** add your Render URL here after deployment
+
+ASCII Studio combines a React/Vite editor with a Rust renderer and Axum API.
+It supports black-and-white and color output, custom character ramps, presets,
+contrast and brightness controls, custom fonts, and PNG downloads.
+
+## Deploy on Render
+
+The repository includes a [`render.yaml`](./render.yaml) blueprint and a
+[`Dockerfile`](./Dockerfile) for deploying the frontend and API as two free
+Render services. The API uses an openly licensed DejaVu Sans Mono font from the
+`fonts-dejavu` Debian package, so no macOS font needs to be uploaded.
+
+1. Push this repository to GitHub.
+2. In the [Render dashboard](https://dashboard.render.com/), choose **New >
+  Blueprint** and select this repository.
+3. Review the two services from `render.yaml` and deploy them on the Free plan.
+4. If you change either generated service name, update both
+  `VITE_API_URL` and `ASCII_ALLOWED_ORIGIN` to match the final URLs.
+5. Open the frontend URL and test an image conversion.
+
+Render free web services sleep after inactivity, so the first request after a
+quiet period can take about a minute. Uploaded images are processed in memory
+and are not stored by this application.
+
+The frontend can also be deployed separately as a static site. Set
+`VITE_API_URL` to the API's full `/convert` URL at build time. The API requires
+`PORT` is detected automatically on Render. For another host, set
+`ASCII_BIND=0.0.0.0:<port>` and set `ASCII_ALLOWED_ORIGIN` to the frontend's
+origin.
+
+## Local development
+
+Rust library and CLI usage are documented below. To run the full application
+locally, use `./run.sh` after installing Rust, Node.js, and npm.
 
 ## Library API
 

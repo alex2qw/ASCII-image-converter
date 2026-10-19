@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: ascii-image-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    envVars:
+      - key: ASCII_ALLOWED_ORIGIN
+        value: https://ascii-image-frontend.onrender.com
+
+  - type: web
+    name: ascii-image-frontend
+    runtime: static
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    rootDir: frontend
+    plan: free
+    envVars:
+      - key: VITE_API_URL
+        value: https://ascii-image-api.onrender.com/convert
