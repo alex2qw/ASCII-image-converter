@@ -9,7 +9,10 @@ use axum::{
 };
 use serde::Serialize;
 use std::{env, net::SocketAddr, sync::Arc};
-use tower_http::cors::CorsLayer;
+use tower_http::{
+    cors::CorsLayer,
+    services::ServeDir,
+};
 
 #[derive(Clone)]
 struct AppState {
@@ -139,7 +142,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/convert", post(convert))
         .with_state(state)
         .layer(DefaultBodyLimit::max(config.max_request_bytes))
-        .layer(cors);
+        .layer(cors)
+        .fallback_service(ServeDir::new(
+            env::var("ASCII_FRONTEND_DIR").unwrap_or_else(|_| "frontend/dist".to_owned()),
+        ));
     let listener = tokio::net::TcpListener::bind(config.bind).await?;
     println!(
         "ASCII image converter listening on {}",

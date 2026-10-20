@@ -1,3 +1,12 @@
+---
+title: ASCII Studio
+emoji: 🖼️
+colorFrom: gray
+colorTo: indigo
+sdk: docker
+app_port: 7860
+---
+
 # ASCII Studio
 
 Convert images into customizable ASCII art in the browser.
@@ -28,10 +37,21 @@ quiet period can take about a minute. Uploaded images are processed in memory
 and are not stored by this application.
 
 The frontend can also be deployed separately as a static site. Set
-`VITE_API_URL` to the API's full `/convert` URL at build time. The API requires
-`PORT` is detected automatically on Render. For another host, set
+`VITE_API_URL` to the API's full `/convert` URL at build time. `PORT` is
+detected automatically on Render. For another host, set
 `ASCII_BIND=0.0.0.0:<port>` and set `ASCII_ALLOWED_ORIGIN` to the frontend's
 origin.
+
+## Deploy for free on Hugging Face Spaces
+
+If Render asks for payment information, use a Hugging Face Docker Space
+instead. It can host the frontend and API together without a separate
+frontend service. Create a new public Space with the **Docker** SDK, then
+connect or push this repository to the Space and wait for it to build.
+
+The container listens on port `7860`, which is configured in the Dockerfile.
+The resulting Space URL is the public website; no `VITE_API_URL` setting is
+needed because the browser and `/convert` API share the same origin.
 
 ## Local development
 
