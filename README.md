@@ -114,6 +114,16 @@ limits (with safe defaults); `ASCII_BIND` controls the listen address.
 `max_output_pixels` to this policy, just as it does input limits. Oversized
 output returns HTTP 413 with code `output_too_large`.
 
+CPU-heavy decoding, rendering, and PNG encoding run on Tokio's blocking thread
+pool so they do not occupy async runtime workers. Set
+`ASCII_MAX_CONCURRENT_CONVERSIONS` to a positive integer to control capacity
+(default: `2`). A slot is reserved before buffering multipart fields and held
+until the worker finishes. When all slots are occupied, new conversion requests
+return HTTP 503 with `error.code: "server_busy"`; requests are not queued.
+Disconnecting a client does not stop blocking work already started, so that work
+retains its slot until completion. Slow uploads also occupy slots; request/upload
+timeouts and deployment-wide memory limits are separate operational concerns.
+
 The decoder also has a 128 MiB allocation budget. This is a best-effort limit
 in the image library; some formats do not enforce every internal allocation.
 These limits apply to each conversion, not total service memory: intermediate
