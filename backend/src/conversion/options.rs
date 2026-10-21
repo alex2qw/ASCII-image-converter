@@ -21,6 +21,7 @@ pub struct AsciiOptions {
     pub background: String,
     pub max_input_bytes: usize,
     pub max_input_pixels: u64,
+    pub max_output_pixels: u64,
 }
 impl Default for AsciiOptions {
     fn default() -> Self {
@@ -37,6 +38,7 @@ impl Default for AsciiOptions {
             background: "#000000".to_owned(),
             max_input_bytes: 10 * 1024 * 1024,
             max_input_pixels: 16_000_000,
+            max_output_pixels: 16_000_000,
         }
     }
 }
@@ -45,8 +47,8 @@ impl AsciiOptions {
         if self.max_columns == 0 || self.max_columns > 1000 {
             return Err("max_columns must be between 1 and 1000".to_owned());
         }
-        if self.font_size <= 0.0 {
-            return Err("font_size must be greater than zero".to_owned());
+        if !self.font_size.is_finite() || !(1.0..=256.0).contains(&self.font_size) {
+            return Err("font_size must be finite and between 1 and 256".to_owned());
         }
         if self.character_width == 0
             || self.character_height == 0
@@ -67,8 +69,8 @@ impl AsciiOptions {
         if parse_background(&self.background).is_none() {
             return Err("background must be a six-digit hexadecimal color".to_owned());
         }
-        if self.max_input_bytes == 0 || self.max_input_pixels == 0 {
-            return Err("input limits must be greater than zero".to_owned());
+        if self.max_input_bytes == 0 || self.max_input_pixels == 0 || self.max_output_pixels == 0 {
+            return Err("input and output limits must be greater than zero".to_owned());
         }
         Ok(())
     }
@@ -76,7 +78,7 @@ impl AsciiOptions {
 
 pub(crate) fn parse_background(value: &str) -> Option<[u8; 4]> {
     let value = value.strip_prefix('#')?;
-    if value.len() != 6 {
+    if value.len() != 6 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return None;
     }
     Some([
@@ -85,4 +87,47 @@ pub(crate) fn parse_background(value: &str) -> Option<[u8; 4]> {
         u8::from_str_radix(&value[4..6], 16).ok()?,
         u8::MAX,
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn background_rejects_unicode_and_malformed_hex_without_panicking() {
+        for value in ["#a€bc", "#💥ab", "#１２", "#gg0000", "ffffff", "#fff"] {
+            assert_eq!(parse_background(value), None, "{value}");
+        }
+        assert_eq!(parse_background("#aB09fF"), Some([171, 9, 255, 255]));
+    }
+
+    #[test]
+    fn font_size_must_be_finite_and_bounded() {
+        for font_size in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 0.0, 257.0] {
+            assert!(AsciiOptions {
+                font_size,
+                ..AsciiOptions::default()
+            }
+            .validate()
+            .is_err());
+        }
+        for font_size in [1.0, 16.0, 256.0] {
+            assert!(AsciiOptions {
+                font_size,
+                ..AsciiOptions::default()
+            }
+            .validate()
+            .is_ok());
+        }
+    }
+
+    #[test]
+    fn output_budget_must_be_positive() {
+        assert!(AsciiOptions {
+            max_output_pixels: 0,
+            ..AsciiOptions::default()
+        }
+        .validate()
+        .is_err());
+    }
 }

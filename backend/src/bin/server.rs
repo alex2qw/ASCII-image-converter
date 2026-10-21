@@ -9,16 +9,14 @@ use axum::{
 };
 use serde::Serialize;
 use std::{env, net::SocketAddr, sync::Arc};
-use tower_http::{
-    cors::CorsLayer,
-    services::ServeDir,
-};
+use tower_http::{cors::CorsLayer, services::ServeDir};
 
 #[derive(Clone)]
 struct AppState {
     font: Arc<Vec<u8>>,
     max_input_bytes: usize,
     max_input_pixels: u64,
+    max_output_pixels: u64,
 }
 
 #[derive(Serialize)]
@@ -44,9 +42,9 @@ impl IntoResponse for ServiceError {
     fn into_response(self) -> Response {
         let error = self.0;
         let status = match &error {
-            ConversionError::InputTooLarge { .. } | ConversionError::ImageTooLarge { .. } => {
-                StatusCode::PAYLOAD_TOO_LARGE
-            }
+            ConversionError::InputTooLarge { .. }
+            | ConversionError::ImageTooLarge { .. }
+            | ConversionError::OutputTooLarge { .. } => StatusCode::PAYLOAD_TOO_LARGE,
             ConversionError::RequestTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             ConversionError::Image(_) | ConversionError::InvalidOptions(_) => {
                 StatusCode::BAD_REQUEST
@@ -75,6 +73,7 @@ struct ServerConfig {
     max_request_bytes: usize,
     max_input_bytes: usize,
     max_input_pixels: u64,
+    max_output_pixels: u64,
     allowed_origin: HeaderValue,
 }
 
@@ -83,9 +82,7 @@ impl ServerConfig {
         let default_bind = env::var("PORT")
             .map(|port| format!("0.0.0.0:{port}"))
             .unwrap_or_else(|_| "127.0.0.1:3000".to_owned());
-        let bind = env::var("ASCII_BIND")
-            .unwrap_or(default_bind)
-            .parse()?;
+        let bind = env::var("ASCII_BIND").unwrap_or(default_bind).parse()?;
         let font_path = env::var("ASCII_FONT_PATH")
             .map_err(|_| "ASCII_FONT_PATH must point to a licensed .ttf font file")?;
         let max_input_bytes = env_usize("ASCII_MAX_INPUT_BYTES", 10 * 1024 * 1024)?;
@@ -94,11 +91,16 @@ impl ServerConfig {
             max_input_bytes.saturating_add(64 * 1024),
         )?;
         let max_input_pixels = env_u64("ASCII_MAX_INPUT_PIXELS", 16_000_000)?;
+        let max_output_pixels = env_u64("ASCII_MAX_OUTPUT_PIXELS", 16_000_000)?;
         let allowed_origin = env::var("ASCII_ALLOWED_ORIGIN")
             .unwrap_or_else(|_| "http://localhost:5173".to_owned())
             .parse()?;
-        if max_request_bytes == 0 || max_input_bytes == 0 || max_input_pixels == 0 {
-            return Err("request and input limits must be greater than zero".into());
+        if max_request_bytes == 0
+            || max_input_bytes == 0
+            || max_input_pixels == 0
+            || max_output_pixels == 0
+        {
+            return Err("request, input, and output limits must be greater than zero".into());
         }
         Ok(Self {
             bind,
@@ -106,6 +108,7 @@ impl ServerConfig {
             max_request_bytes,
             max_input_bytes,
             max_input_pixels,
+            max_output_pixels,
             allowed_origin,
         })
     }
@@ -133,6 +136,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         font,
         max_input_bytes: config.max_input_bytes,
         max_input_pixels: config.max_input_pixels,
+        max_output_pixels: config.max_output_pixels,
     };
     let cors = CorsLayer::new()
         .allow_origin(config.allowed_origin)
@@ -185,6 +189,7 @@ async fn convert(
     })?;
     options.max_input_bytes = options.max_input_bytes.min(state.max_input_bytes);
     options.max_input_pixels = options.max_input_pixels.min(state.max_input_pixels);
+    options.max_output_pixels = options.max_output_pixels.min(state.max_output_pixels);
     let font = custom_font.as_deref().unwrap_or(state.font.as_slice());
     let output = convert_image_to_png(&image, font, &options)?;
     Ok(([(axum::http::header::CONTENT_TYPE, "image/png")], output))
@@ -198,5 +203,23 @@ fn map_multipart_error(error: axum::extract::multipart::MultipartError) -> Conve
             "multipart request could not be read: {}",
             error.body_text()
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn oversized_output_is_a_payload_too_large_response() {
+        let error = ConversionError::OutputTooLarge {
+            actual: 17_000_000,
+            max: 16_000_000,
+        };
+        assert_eq!(error.code(), "output_too_large");
+        assert_eq!(
+            ServiceError(error).into_response().status(),
+            StatusCode::PAYLOAD_TOO_LARGE
+        );
     }
 }

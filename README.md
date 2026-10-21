@@ -72,7 +72,7 @@ let options = AsciiOptions {
 let output_png = convert_image_to_png(&image_bytes, &font_bytes, &options)?;
 ~~~
 
-The function returns PNG bytes suitable for an HTTP response. It enforces input-byte and decoded-pixel limits before rendering. Configure those limits through AsciiOptions for the web application policy.
+The function returns PNG bytes suitable for an HTTP response. It checks input bytes, image dimensions, and planned output dimensions before decoding the full pixel buffer. Configure those limits through AsciiOptions for the web application policy.
 
 The font is supplied by the caller, so the library has no operating-system-specific font path. A web application can load a bundled, licensed font during startup and reuse its bytes for requests.
 
@@ -109,6 +109,18 @@ The service rejects oversized request bodies before parsing them. Its
 `ASCII_MAX_REQUEST_BYTES`, `ASCII_MAX_INPUT_BYTES`, and
 `ASCII_MAX_INPUT_PIXELS` environment variables provide request and conversion
 limits (with safe defaults); `ASCII_BIND` controls the listen address.
+`ASCII_MAX_OUTPUT_PIXELS` caps rendered output at 16,000,000 pixels by default
+(about 61 MiB for the RGBA buffer alone). The server clamps client-provided
+`max_output_pixels` to this policy, just as it does input limits. Oversized
+output returns HTTP 413 with code `output_too_large`.
+
+The decoder also has a 128 MiB allocation budget. This is a best-effort limit
+in the image library; some formats do not enforce every internal allocation.
+These limits apply to each conversion, not total service memory: intermediate
+buffers, PNG encoding, and concurrent requests require additional memory.
+Font size must be finite and between 1 and 256 pixels. Background colours must
+be exactly `#` followed by six ASCII hexadecimal digits.
+
 Conversion failures return JSON with a stable `error.code` and human-readable
 `error.message`. Invalid input/options use 400, size limits use 413, and
 startup/font failures are reported as server errors.

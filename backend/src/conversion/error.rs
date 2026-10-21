@@ -8,6 +8,8 @@ pub enum ConversionError {
     InputTooLarge { actual: usize, max: usize },
     #[error("decoded image is too large: {actual} pixels exceeds the {max} pixel limit")]
     ImageTooLarge { actual: u64, max: u64 },
+    #[error("rendered image is too large: {actual} pixels exceeds the {max} pixel limit")]
+    OutputTooLarge { actual: u64, max: u64 },
     #[error("request is too large for the configured upload limit")]
     RequestTooLarge,
     #[error("image decoding failed: {0}")]
@@ -37,6 +39,7 @@ impl ConversionError {
         match self {
             Self::InputTooLarge { .. } => "input_too_large",
             Self::ImageTooLarge { .. } => "image_too_large",
+            Self::OutputTooLarge { .. } => "output_too_large",
             Self::RequestTooLarge => "request_too_large",
             Self::Image(_) => "invalid_image",
             Self::MissingFont => "missing_font",
