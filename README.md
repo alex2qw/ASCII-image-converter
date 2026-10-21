@@ -165,6 +165,58 @@ npm run dev
 npm run build
 ~~~
 
+## Automated checks
+
+Tests check specific behaviour; continuous integration (CI) runs those checks
+automatically on a clean machine. The [GitHub Actions workflow](.github/workflows/ci.yml)
+runs on pushes to `main`, pull requests, and manual dispatches from the Actions tab.
+
+Two independent jobs check the application:
+
+- **Rust tests and lint:** checks formatting, runs regression and real HTTP API tests, and runs
+  Clippy with warnings treated as errors. It uses stable Rust and `Cargo.lock`.
+- **Frontend tests and build:** installs dependencies from `package-lock.json`,
+  runs the Vitest tests, then type-checks and builds the frontend with Node.js 24.
+
+A failed check marks the workflow as failed. Requiring these checks before
+merging is a separate repository ruleset setting. This workflow does not deploy
+the application. Current tests cover resource limits, worker concurrency and
+cancellation, the frontend conversion lifecycle, and real HTTP image conversion.
+Browser interaction and deployment/container testing are separate checks.
+
+To reproduce the backend checks locally:
+
+~~~sh
+cargo fmt --manifest-path backend/Cargo.toml --all -- --check
+cargo test --locked --manifest-path backend/Cargo.toml
+cargo clippy --locked --manifest-path backend/Cargo.toml --all-targets -- -D warnings
+~~~
+
+## API end-to-end tests
+
+[`backend/tests/api_e2e.rs`](backend/tests/api_e2e.rs) starts the actual server
+binary on an OS-assigned localhost port and sends real multipart HTTP requests.
+It creates input PNGs in memory and decodes the returned PNGs, checking dimensions,
+background pixels, visible glyphs, black-and-white rendering, and color rendering
+with an uploaded custom font. No conversion functions or HTTP responses are mocked.
+
+Error cases verify structured responses for missing/invalid images, malformed
+Unicode colors, oversized multipart requests, and attempts to raise server-side
+input/output limits. Recovery checks send a valid conversion after a failed one.
+Each test owns and stops its server process, including when an assertion fails.
+
+These tests need a licensed TrueType font and permission to bind localhost, so
+they are marked `#[ignore]` in the default test run. Run them explicitly:
+
+~~~sh
+ASCII_TEST_FONT=/absolute/path/to/monospace.ttf cargo test --locked --manifest-path backend/Cargo.toml --test api_e2e -- --ignored
+~~~
+
+For example, macOS provides `/System/Library/Fonts/Supplemental/Courier New.ttf`.
+CI installs DejaVu Sans Mono and runs this suite explicitly; missing font
+configuration causes a failure rather than silently skipping the checks.
+These are API end-to-end tests, not browser click/upload/download tests.
+
 ## Frontend checks
 
 Run `npm test` from `frontend/` for conversion lifecycle, status display, stale

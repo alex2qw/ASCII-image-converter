@@ -24,6 +24,13 @@ or rendering.
 
 ## Build, test, and lint commands
 
+`.github/workflows/ci.yml` runs backend formatting/tests/Clippy and frontend
+locked dependency installation/tests/build as separate jobs on pushes to main
+and pull requests. The backend job also installs DejaVu Sans Mono and explicitly
+runs the ignored `api_e2e` integration suite. Keep its commands aligned with the checks below. Frontend CI
+uses Node.js 24 and backend CI uses stable Rust. CI reports failures; required
+merge checks are configured separately in repository rulesets.
+
 Run Rust commands from the repository root with the manifest path:
 
 ```sh
@@ -61,6 +68,22 @@ The production image can be built with `docker build -t ascii-studio .`.
 When browser-level validation is useful, the project-local `.vscode/mcp.json`
 provides a Playwright MCP server. Start the app with `./run.sh` first, then use
 the server against the Vite URL shown by the launcher.
+
+## API end-to-end tests
+
+`backend/tests/api_e2e.rs` launches the actual compiled server binary on an
+OS-assigned localhost port, uploads generated PNGs over real TCP/HTTP, and decodes
+returned PNGs. No extra test dependencies or checked-in font/image binaries are
+needed. Each test owns and stops its server process. These tests are ignored by
+the default test command because they require a licensed font and socket access.
+Run them explicitly with:
+
+```sh
+ASCII_TEST_FONT=/absolute/path/to/font.ttf cargo test --locked --manifest-path backend/Cargo.toml --test api_e2e -- --ignored
+```
+
+CI must keep running this command; a normal `cargo test` alone does not execute
+these ignored tests. Missing `ASCII_TEST_FONT` must fail the explicit suite.
 
 ## Cross-layer contracts
 
