@@ -77,8 +77,21 @@ body {
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: #3a9d69;
+    background: var(--muted);
     margin-right: 7px
+}
+
+.api-status.success i {
+    background: #3a9d69
+}
+
+.api-status.waiting i,
+.api-status.rendering i {
+    background: #ba7b19
+}
+
+.api-status.error i {
+    background: #b43820
 }
 
 .intro {

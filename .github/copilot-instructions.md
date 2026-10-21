@@ -39,9 +39,9 @@ To run one Rust test by name:
 cargo test --manifest-path backend/Cargo.toml <test_name>
 ```
 
-There are currently no Rust test modules and no frontend test runner or lint
-script configured, so `cargo test` and a frontend type-check/build are the
-available automated checks.
+Rust regression tests run with `cargo test`. Frontend tests use Vitest and
+React Testing Library with jsdom; run `npm test` from `frontend/`. No frontend
+lint script is configured.
 
 For the frontend:
 
@@ -49,6 +49,7 @@ For the frontend:
 cd frontend
 npm ci
 npm run typecheck
+npm test
 npm run build
 ```
 
@@ -99,10 +100,12 @@ the server against the Vite URL shown by the launcher.
 
 ## Frontend conventions
 
-- `App.tsx` is the current feature composition point: selecting an image or
-  changing any option starts a new conversion, aborting the previous request.
-  Preserve abort handling and revoke object URLs when replacing preview/source
-  blobs.
+- `App.tsx` composes the editor UI; `hooks/useConversion.ts` owns the
+  debounced conversion lifecycle. Image, font, or option changes hide outdated
+  results immediately, abort old requests, and wait 300 ms before submitting.
+  Export only results matching the current request. Status describes conversion
+  attempts, not persistent server connectivity. Preserve stale-response guards
+  and object URL cleanup, including on removal and unmount.
 - Built-in and user presets use the same `ConvertOptions` object. Custom
   presets are stored under the `ascii-studio-presets` localStorage key.
 - The browser rejects non-image files and applies the 10 MiB client-side

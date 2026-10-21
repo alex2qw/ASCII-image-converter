@@ -149,6 +149,13 @@ backend/src/bin/server.rs             Axum HTTP service adapter
 ## Web frontend
 
 The Vite client lives in `frontend/` and runs with `npm run dev` from that directory. Development proxies `/convert` to the local Axum adapter at `http://127.0.0.1:3000`. For a deployed frontend, set `VITE_API_URL` to the API URL or use a same-origin reverse proxy. The request is `multipart/form-data` with `image`, optional `font`, and JSON `options` parts; the response is a PNG (`image/png`) or `{ "error": { "message": "..." } }` on failure. The Rust library maps all editor fields (`mode`, `max_columns`, `font_size`, `character_width`, `character_height`, `ramp`, `contrast`, `brightness`, `invert`, and `background`) to `AsciiOptions`. The browser never uploads an image until one is selected, and custom presets are stored only in localStorage.
+Preview requests wait for a 300 ms pause in editing. Status labels describe the
+latest conversion attempt rather than claiming a persistent server connection.
+When the image, font, or settings change, the previous preview is hidden and
+exports remain disabled until the new conversion succeeds. Failed conversions
+can be retried. Cancelling an old browser request prevents stale results from
+appearing; it does not stop server work already running.
+
 Images larger than the configured 10 MiB default upload limit are rejected in the browser before a request is sent. Configure the server's `ASCII_MAX_INPUT_BYTES` and `ASCII_MAX_REQUEST_BYTES` together when a larger upload limit is required.
 
 ~~~sh
@@ -157,6 +164,12 @@ npm install
 npm run dev
 npm run build
 ~~~
+
+## Frontend checks
+
+Run `npm test` from `frontend/` for conversion lifecycle, status display, stale
+response, export, retry, and API response tests. Run `npm run build` to type-check
+and build the client.
 
 ## Run everything with one command
 
