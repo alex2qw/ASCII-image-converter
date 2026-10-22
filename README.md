@@ -9,239 +9,106 @@ app_port: 7860
 
 # ASCII Studio
 
-Convert images into customizable ASCII art in the browser.
+Turn images into customisable character art with a React editor and a Rust renderer.
+Upload an image, adjust its appearance, and download the result as a PNG.
 
-**Live demo:** add your Render URL here after deployment
+**Rust · Axum · React · TypeScript · Vite**
 
-ASCII Studio combines a React/Vite editor with a Rust renderer and Axum API.
-It supports black-and-white and color output, custom character ramps, presets,
-contrast and brightness controls, custom fonts, and PNG downloads.
+[Quick start](#quick-start) · [Engineering decisions](#engineering-decisions) · [Tests](#tests) · [Development & API](docs/development.md) · [Deployment](docs/deployment.md)
 
-## Deploy on Render
+## The editor
 
-The repository includes a [`render.yaml`](./render.yaml) blueprint and a
-[`Dockerfile`](./Dockerfile) for deploying the frontend and API as two free
-Render services. The API uses an openly licensed DejaVu Sans Mono font from the
-`fonts-dejavu` Debian package, so no macOS font needs to be uploaded.
+![ASCII Studio running in Safari, with colour mode, a 240-column character grid, and a completed image conversion](docs/images/editor-workspace.jpg)
 
-1. Push this repository to GitHub.
-2. In the [Render dashboard](https://dashboard.render.com/), choose **New >
-  Blueprint** and select this repository.
-3. Review the two services from `render.yaml` and deploy them on the Free plan.
-4. If you change either generated service name, update both
-  `VITE_API_URL` and `ASCII_ALLOWED_ORIGIN` to match the final URLs.
-5. Open the frontend URL and test an image conversion.
+*Actual application screenshot after uploading and converting the sample image through the HTTP API.*
 
-Render free web services sleep after inactivity, so the first request after a
-quiet period can take about a minute. Uploaded images are processed in memory
-and are not stored by this application.
+- Black-and-white and colour rendering with adjustable width, contrast, and brightness.
+- Custom character ramps, ramp inversion, background colours, and uploaded fonts.
+- Built-in presets and custom presets saved in the browser.
+- Automatic previews after a 300 ms pause in editing, with loading/error states and retry.
+- PNG downloads and browser-dependent image copying. Exports are enabled only for a result that matches the current settings.
 
-The frontend can also be deployed separately as a static site. Set
-`VITE_API_URL` to the API's full `/convert` URL at build time. `PORT` is
-detected automatically on Render. For another host, set
-`ASCII_BIND=0.0.0.0:<port>` and set `ASCII_ALLOWED_ORIGIN` to the frontend's
-origin.
+## Example output
 
-## Deploy for free on Hugging Face Spaces
+| Input | Colour character art |
+| :---: | :---: |
+| <a href="docs/images/creation-of-adam-source.jpg"><img src="docs/images/creation-of-adam-source.jpg" width="420" alt="The reaching hands in Michelangelo’s The Creation of Adam"></a> | <a href="docs/images/creation-of-adam-color.png"><img src="docs/images/creation-of-adam-color.png" width="420" alt="The same hands rendered as coloured characters by the Rust converter"></a> |
 
-If Render asks for payment information, use a Hugging Face Docker Space
-instead. It can host the frontend and API together without a separate
-frontend service. Create a new public Space with the **Docker** SDK, then
-connect or push this repository to the Space and wait for it to build.
+Click either image for full resolution, or view the [black-and-white output](docs/images/creation-of-adam-bw.png). These examples use the shared Rust library; their settings and source credit are recorded in [the media notes](docs/media.md).
 
-The container listens on port `7860`, which is configured in the Dockerfile.
-The resulting Space URL is the public website; no `VITE_API_URL` setting is
-needed because the browser and `/convert` API share the same origin.
+## Quick start
 
-## Local development
+You need **stable Rust/Cargo**, **Node.js 24 and npm** (the frontend CI version), and a licensed TrueType font.
 
-Rust library and CLI usage are documented below. To run the full application
-locally, use `./run.sh` after installing Rust, Node.js, and npm.
-
-## Library API
-
-The web layer should pass uploaded image bytes and font bytes directly to the library:
-
-~~~rust
-use ascii_image_converter::{convert_image_to_png, AsciiMode, AsciiOptions};
-
-let options = AsciiOptions {
-    mode: AsciiMode::Color,
-    ..AsciiOptions::default()
-};
-let output_png = convert_image_to_png(&image_bytes, &font_bytes, &options)?;
-~~~
-
-The function returns PNG bytes suitable for an HTTP response. It checks input bytes, image dimensions, and planned output dimensions before decoding the full pixel buffer. Configure those limits through AsciiOptions for the web application policy.
-
-The font is supplied by the caller, so the library has no operating-system-specific font path. A web application can load a bundled, licensed font during startup and reuse its bytes for requests.
-
-## CLI
-
-The CLI reads a local input file and writes a local output file. It requires a TrueType font path through ASCII_FONT_PATH:
-
-~~~sh
-ASCII_FONT_PATH=/path/to/monospace.ttf cargo run --manifest-path backend/Cargo.toml -- input_image.png output_image.png
-ASCII_FONT_PATH=/path/to/monospace.ttf ASCII_MODE=color cargo run --manifest-path backend/Cargo.toml -- input_image.png output_image.png
-~~~
-
-Supported modes are black_and_white (the default), bw, and color.
-
-## HTTP service
-
-Run the HTTP adapter with a licensed TrueType font loaded once at startup:
-
-~~~sh
-ASCII_FONT_PATH=/path/to/monospace.ttf cargo run --manifest-path backend/Cargo.toml --bin server
-~~~
-
-`POST /convert` accepts a `multipart/form-data` request with an `image` file
-field and an `options` field containing serialized `AsciiOptions` JSON. The
-response is PNG bytes (`Content-Type: image/png`). For example:
-
-~~~sh
-curl -X POST http://127.0.0.1:3000/convert \
-  -F image=@input_image.png \
-  -F 'options={"mode":"color","max_columns":80}'
-~~~
-
-The service rejects oversized request bodies before parsing them. Its
-`ASCII_MAX_REQUEST_BYTES`, `ASCII_MAX_INPUT_BYTES`, and
-`ASCII_MAX_INPUT_PIXELS` environment variables provide request and conversion
-limits (with safe defaults); `ASCII_BIND` controls the listen address.
-`ASCII_MAX_OUTPUT_PIXELS` caps rendered output at 16,000,000 pixels by default
-(about 61 MiB for the RGBA buffer alone). The server clamps client-provided
-`max_output_pixels` to this policy, just as it does input limits. Oversized
-output returns HTTP 413 with code `output_too_large`.
-
-CPU-heavy decoding, rendering, and PNG encoding run on Tokio's blocking thread
-pool so they do not occupy async runtime workers. Set
-`ASCII_MAX_CONCURRENT_CONVERSIONS` to a positive integer to control capacity
-(default: `2`). A slot is reserved before buffering multipart fields and held
-until the worker finishes. When all slots are occupied, new conversion requests
-return HTTP 503 with `error.code: "server_busy"`; requests are not queued.
-Disconnecting a client does not stop blocking work already started, so that work
-retains its slot until completion. Slow uploads also occupy slots; request/upload
-timeouts and deployment-wide memory limits are separate operational concerns.
-
-The decoder also has a 128 MiB allocation budget. This is a best-effort limit
-in the image library; some formats do not enforce every internal allocation.
-These limits apply to each conversion, not total service memory: intermediate
-buffers, PNG encoding, and concurrent requests require additional memory.
-Font size must be finite and between 1 and 256 pixels. Background colours must
-be exactly `#` followed by six ASCII hexadecimal digits.
-
-Conversion failures return JSON with a stable `error.code` and human-readable
-`error.message`. Invalid input/options use 400, size limits use 413, and
-startup/font failures are reported as server errors.
-
-## Project layout
-
-~~~text
-backend/src/lib.rs                    Public library API
-backend/src/conversion/options.rs     Modes, rendering options, and resource limits
-backend/src/conversion/error.rs       Typed conversion errors
-backend/src/conversion/renderer.rs    In-memory image conversion
-backend/src/bin/converter.rs          Local file CLI adapter
-backend/src/bin/server.rs             Axum HTTP service adapter
-~~~
-
-## Web frontend
-
-The Vite client lives in `frontend/` and runs with `npm run dev` from that directory. Development proxies `/convert` to the local Axum adapter at `http://127.0.0.1:3000`. For a deployed frontend, set `VITE_API_URL` to the API URL or use a same-origin reverse proxy. The request is `multipart/form-data` with `image`, optional `font`, and JSON `options` parts; the response is a PNG (`image/png`) or `{ "error": { "message": "..." } }` on failure. The Rust library maps all editor fields (`mode`, `max_columns`, `font_size`, `character_width`, `character_height`, `ramp`, `contrast`, `brightness`, `invert`, and `background`) to `AsciiOptions`. The browser never uploads an image until one is selected, and custom presets are stored only in localStorage.
-Preview requests wait for a 300 ms pause in editing. Status labels describe the
-latest conversion attempt rather than claiming a persistent server connection.
-When the image, font, or settings change, the previous preview is hidden and
-exports remain disabled until the new conversion succeeds. Failed conversions
-can be retried. Cancelling an old browser request prevents stale results from
-appearing; it does not stop server work already running.
-
-Images larger than the configured 10 MiB default upload limit are rejected in the browser before a request is sent. Configure the server's `ASCII_MAX_INPUT_BYTES` and `ASCII_MAX_REQUEST_BYTES` together when a larger upload limit is required.
-
-~~~sh
-cd frontend
-npm install
-npm run dev
-npm run build
-~~~
-
-## Automated checks
-
-Tests check specific behaviour; continuous integration (CI) runs those checks
-automatically on a clean machine. The [GitHub Actions workflow](.github/workflows/ci.yml)
-runs on pushes to `main`, pull requests, and manual dispatches from the Actions tab.
-
-Two independent jobs check the application:
-
-- **Rust tests and lint:** checks formatting, runs regression and real HTTP API tests, and runs
-  Clippy with warnings treated as errors. It uses stable Rust and `Cargo.lock`.
-- **Frontend tests and build:** installs dependencies from `package-lock.json`,
-  runs the Vitest tests, then type-checks and builds the frontend with Node.js 24.
-
-A failed check marks the workflow as failed. Requiring these checks before
-merging is a separate repository ruleset setting. This workflow does not deploy
-the application. Current tests cover resource limits, worker concurrency and
-cancellation, the frontend conversion lifecycle, and real HTTP image conversion.
-Browser interaction and deployment/container testing are separate checks.
-
-To reproduce the backend checks locally:
-
-~~~sh
-cargo fmt --manifest-path backend/Cargo.toml --all -- --check
-cargo test --locked --manifest-path backend/Cargo.toml
-cargo clippy --locked --manifest-path backend/Cargo.toml --all-targets -- -D warnings
-~~~
-
-## API end-to-end tests
-
-[`backend/tests/api_e2e.rs`](backend/tests/api_e2e.rs) starts the actual server
-binary on an OS-assigned localhost port and sends real multipart HTTP requests.
-It creates input PNGs in memory and decodes the returned PNGs, checking dimensions,
-background pixels, visible glyphs, black-and-white rendering, and color rendering
-with an uploaded custom font. No conversion functions or HTTP responses are mocked.
-
-Error cases verify structured responses for missing/invalid images, malformed
-Unicode colors, oversized multipart requests, and attempts to raise server-side
-input/output limits. Recovery checks send a valid conversion after a failed one.
-Each test owns and stops its server process, including when an assertion fails.
-
-These tests need a licensed TrueType font and permission to bind localhost, so
-they are marked `#[ignore]` in the default test run. Run them explicitly:
-
-~~~sh
-ASCII_TEST_FONT=/absolute/path/to/monospace.ttf cargo test --locked --manifest-path backend/Cargo.toml --test api_e2e -- --ignored
-~~~
-
-For example, macOS provides `/System/Library/Fonts/Supplemental/Courier New.ttf`.
-CI installs DejaVu Sans Mono and runs this suite explicitly; missing font
-configuration causes a failure rather than silently skipping the checks.
-These are API end-to-end tests, not browser click/upload/download tests.
-
-## Frontend checks
-
-Run `npm test` from `frontend/` for conversion lifecycle, status display, stale
-response, export, retry, and API response tests. Run `npm run build` to type-check
-and build the client.
-
-## Run everything with one command
-
-On macOS, make the launcher executable once:
-
-~~~sh
-chmod +x run.sh
-~~~
-
-Then start both the Rust API and the Vite frontend with:
-
-~~~sh
+```sh
+git clone https://github.com/alex2qw/ASCII-image-converter.git
+cd ASCII-image-converter
 ./run.sh
-~~~
+```
 
-The launcher finds a system TrueType font automatically. To use a specific
-font, set `ASCII_FONT_PATH` before running it:
+The launcher installs frontend dependencies if needed and starts both services.
+Open the Vite URL printed in the terminal, usually `http://localhost:5173`.
+The API listens on `http://127.0.0.1:3000`. Press `Ctrl+C` to stop both.
 
-~~~sh
-ASCII_FONT_PATH=/path/to/monospace.ttf ./run.sh
-~~~
+On macOS, the launcher finds a system font. On other systems, or to choose a monospace font explicitly:
 
-Press `Ctrl+C` to stop both services.
+```sh
+ASCII_FONT_PATH=/absolute/path/to/monospace.ttf ./run.sh
+```
+
+Prefer a container? See the [Docker quick start](docs/deployment.md#docker).
+
+## How it works
+
+```text
+React editor → multipart POST /convert → Axum API → blocking conversion worker
+                                                        ↓
+                        PNG preview/download ← Rust image-to-character renderer
+```
+
+The renderer checks input dimensions and planned output size before full pixel decoding. It resizes the image to a character grid, normalises luminance, applies the editor settings, maps values to a character ramp, and draws glyphs into a PNG.
+
+The library is shared by the HTTP service and CLI. Callers supply image and font bytes, keeping conversion independent of web requests and operating-system font paths.
+
+## Engineering decisions
+
+| Concern | Approach | Tradeoff |
+| :--- | :--- | :--- |
+| Expensive conversion work | Tokio blocking workers with two admission slots by default | Extra requests receive HTTP 503 rather than waiting in a queue |
+| Large allocations | Input-byte, input-pixel, and rendered-output limits | Limits apply per conversion; they are not a total process-memory guarantee |
+| Client cancellation | The worker keeps its permit until it finishes | Disconnecting does not stop work already running |
+| Stale previews | Cancel old requests and check that results match current inputs | Exports stay disabled until the latest conversion succeeds |
+
+## Tests
+
+```sh
+cargo test --locked --manifest-path backend/Cargo.toml
+npm --prefix frontend ci
+npm --prefix frontend test
+npm --prefix frontend run build
+```
+
+The real HTTP suite launches the compiled server, uploads images, decodes returned PNGs, and checks rendering, errors, and server-enforced limits. It needs a licensed font and permission to bind localhost, so it runs separately:
+
+```sh
+ASCII_TEST_FONT=/absolute/path/to/monospace.ttf \
+  cargo test --locked --manifest-path backend/Cargo.toml --test api_e2e -- --ignored
+```
+
+[GitHub Actions](.github/workflows/ci.yml) runs Rust tests, the HTTP suite, formatting, Clippy, and the frontend tests/build. See [all check commands and coverage](docs/development.md#automated-checks).
+
+## Current limitations
+
+- Exports are PNG images; plain-text ASCII export is not implemented.
+- The decoder’s allocation budget is best-effort for some formats. Intermediate buffers and simultaneous requests require additional memory.
+- Slow uploads occupy admission slots. Upload timeouts and deployment-wide memory controls remain separate concerns.
+- Automated tests cover frontend behaviour and the real API; automated browser interaction and container deployment tests are not included.
+
+## Explore the code
+
+- [Rust conversion library](backend/src/conversion) — options, validation, rendering, and typed errors.
+- [HTTP service](backend/src/bin/server.rs) — multipart requests, limits, worker admission, and static frontend serving.
+- [React editor](frontend/src/app/App.tsx) and [conversion lifecycle](frontend/src/app/hooks/useConversion.ts).
+- [API end-to-end tests](backend/tests/api_e2e.rs).
+
+For setup details, the CLI, library usage, and API configuration, read the [development guide](docs/development.md). For Docker, Render, and Hugging Face Spaces, read the [deployment guide](docs/deployment.md).
